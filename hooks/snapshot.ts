@@ -1,7 +1,7 @@
 import type { EngineInterface, SessionMessage } from 'claude-code'
 
 import { fmt } from './model'
-import type { Reading, MeterSettings } from '../types'
+import type { Reading, ControlSettings } from '../types'
 
 const EDITS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 const TASK_TOOLS = new Set(['TodoWrite', 'mcp__ccd_turn__update_plan'])
@@ -54,7 +54,7 @@ function tasksOf(messages: readonly SessionMessage[]): string[] {
 /** Writes a Markdown handoff of the conversation about to be compacted; returns the file's path. */
 export async function writeSnapshot(
   $: EngineInterface,
-  o: { messages: readonly SessionMessage[]; trigger: string; focus?: string; reading: Reading | null; settings: MeterSettings },
+  o: { messages: readonly SessionMessage[]; trigger: string; focus?: string; reading: Reading | null; settings: ControlSettings },
 ): Promise<string> {
   const root = await $.session.root()
   const sep = root.includes('\\') ? '\\' : '/'

@@ -1,8 +1,8 @@
 import type { SessionContextBreakdown } from 'claude-code'
 
-import type { Breakdown, Category, FixedCost, Point, Reading, MeterSettings } from '../types'
+import type { Breakdown, Category, FixedCost, Point, Reading, ControlSettings } from '../types'
 
-export const DEFAULTS: MeterSettings = {
+export const DEFAULTS: ControlSettings = {
   showBand: true,
   startExpanded: false,
   openPaneOnStart: false,
@@ -95,7 +95,7 @@ export function fmtDelta(n: number | undefined): string {
 
 export const limitOf = (reading: Reading, breakdown: Breakdown | null) => breakdown?.threshold ?? reading.window
 
-export function levelOf(tokens: number, limit: number, s: MeterSettings): Level {
+export function levelOf(tokens: number, limit: number, s: ControlSettings): Level {
   const ratio = (tokens / limit) * 100
   if (ratio >= s.alertAt) return 'alert'
   if (ratio >= s.warnAt) return 'warn'

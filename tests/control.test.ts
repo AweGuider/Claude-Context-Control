@@ -77,7 +77,7 @@ test('the band shows fill, growth and turns until auto-compact on both surfaces'
   await measure($, 110_000)
 
   for (const surface of ['desktop', 'terminal'] as const) {
-    const ui = await $.ui.mount({ plugin: 'context-meter', surface, component: 'AbovePrompt', props: BAND })
+    const ui = await $.ui.mount({ plugin: 'context-control', surface, component: 'AbovePrompt', props: BAND })
     expect((await ui.find({ key: 'toggle' }))?.text).toMatch(/11%.*110\.0k \/ 1M.*\+10\.0k last turn/)
     expect(await ui.find({ text: /auto-compact in ~86 turns/ })).toBeDefined()
     await ui.press({ key: 'toggle' })
@@ -99,12 +99,12 @@ test('compact waits while Claude is working, and opens the focus field when idle
   await start($)
   await measure($, 500_000)
 
-  const busy = await $.ui.mount({ plugin: 'context-meter', surface: 'desktop', component: 'AbovePrompt', props: { ...BAND, isWorking: true } })
+  const busy = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: { ...BAND, isWorking: true } })
   expect(await busy.find({ key: 'compact' }), 'no Compact button mid-turn').toBeUndefined()
   expect(await busy.find({ text: 'Compact after this turn' }), 'waiting note').toBeDefined()
   await busy.unmount()
 
-  const ui = await $.ui.mount({ plugin: 'context-meter', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  const ui = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
   await ui.press({ key: 'compact' })
   await ui.input({ key: 'focus', text: 'keep the plan', kind: 'change' })
   await ui.press({ key: 'go' })
@@ -140,19 +140,19 @@ test('a snapshot is written before compaction when turned on', async ($, on) => 
   await start($)
   await measure($, 300_000)
 
-  const pane = await $.ui.mount({ plugin: 'context-meter', surface: 'desktop', component: 'Pane', requestId: 'context-meter', props: { title: 'Context', isFocused: false, bodyColumns: 50, placement: 'dock', scroll: { offset: 0, bodyRows: 40 } } as never })
+  const pane = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'Pane', requestId: 'context-control', props: { title: 'Context', isFocused: false, bodyColumns: 50, placement: 'dock', scroll: { offset: 0, bodyRows: 40 } } as never })
   await pane.press({ key: 'tab-settings' })
   await pane.press({ key: 'set-snapshot' })
   await pane.unmount()
 
   const messages: SessionMessage[] = [
-    { role: 'user', text: 'Build the context meter', toolUses: [] },
+    { role: 'user', text: 'Build the context control', toolUses: [] },
     { role: 'assistant', text: 'On it', toolUses: [{ tool_use_id: '1', tool: 'Edit', input: { file_path: 'C:\\work\\a.ts' } }] },
   ]
   await $.session.compact({ trigger: 'manual', instructions: 'keep the plan', messages })
   const file = [...written.keys()].find(p => p.endsWith('.md'))
   expect(file).toMatch(/^C:\\work\\\.claude\\context-snapshots\\2026-10-15_\d{6}\.md$/)
-  expect(written.get(file!)).toContain('Build the context meter')
+  expect(written.get(file!)).toContain('Build the context control')
   expect(written.get(file!)).toContain('C:\\work\\a.ts')
   expect(written.has('C:\\work\\.claude\\context-snapshots\\.gitignore')).toBe(true)
 })

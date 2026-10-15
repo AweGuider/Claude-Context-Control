@@ -27,7 +27,7 @@ export type Phase = 'idle' | 'compacting' | 'compacted'
 
 export type Tab = 'overview' | 'settings'
 
-export type MeterSettings = {
+export type ControlSettings = {
   showBand: boolean
   startExpanded: boolean
   openPaneOnStart: boolean
@@ -43,7 +43,7 @@ export type MeterSettings = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'context-meter': {
+    'context-control': {
       reading: Reading | null
       history: Point[]
       breakdown: Breakdown | null
@@ -53,7 +53,7 @@ declare module 'claude-code' {
       composing: boolean
       draft: string
       tab: Tab
-      settings: MeterSettings
+      settings: ControlSettings
       shownFill: number
       isAlerted: boolean
       error: string

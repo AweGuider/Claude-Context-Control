@@ -5,23 +5,23 @@ import { DEFAULTS, TEXT_TONE, TONE, clampPercent, fmt, fmtDelta, fmtWindow, grow
 import type { Level } from './model'
 import { writeSnapshot } from './snapshot'
 import { compositionBar, rankBar, sparkline, windowBar } from './svg'
-import type { Breakdown, Compaction, Point, Reading, MeterSettings } from '../types'
+import type { Breakdown, Compaction, Point, Reading, ControlSettings } from '../types'
 
-const PANE = 'context-meter'
+const PANE = 'context-control'
 
-const reading = atom({ plugin: 'context-meter', key: 'reading' } as const, null)
-const history = atom({ plugin: 'context-meter', key: 'history' } as const, [])
-const breakdown = atom({ plugin: 'context-meter', key: 'breakdown' } as const, null)
-const compactions = atom({ plugin: 'context-meter', key: 'compactions' } as const, [])
-const phase = atom({ plugin: 'context-meter', key: 'phase' } as const, 'idle')
-const expanded = atom({ plugin: 'context-meter', key: 'expanded' } as const, false)
-const composing = atom({ plugin: 'context-meter', key: 'composing' } as const, false)
-const draft = atom({ plugin: 'context-meter', key: 'draft' } as const, '')
-const tab = atom({ plugin: 'context-meter', key: 'tab' } as const, 'overview')
-const settings = atom({ plugin: 'context-meter', key: 'settings' } as const, DEFAULTS)
-const shownFill = atom({ plugin: 'context-meter', key: 'shownFill' } as const, 0)
-const isAlerted = atom({ plugin: 'context-meter', key: 'isAlerted' } as const, false)
-const error = atom({ plugin: 'context-meter', key: 'error' } as const, '')
+const reading = atom({ plugin: 'context-control', key: 'reading' } as const, null)
+const history = atom({ plugin: 'context-control', key: 'history' } as const, [])
+const breakdown = atom({ plugin: 'context-control', key: 'breakdown' } as const, null)
+const compactions = atom({ plugin: 'context-control', key: 'compactions' } as const, [])
+const phase = atom({ plugin: 'context-control', key: 'phase' } as const, 'idle')
+const expanded = atom({ plugin: 'context-control', key: 'expanded' } as const, false)
+const composing = atom({ plugin: 'context-control', key: 'composing' } as const, false)
+const draft = atom({ plugin: 'context-control', key: 'draft' } as const, '')
+const tab = atom({ plugin: 'context-control', key: 'tab' } as const, 'overview')
+const settings = atom({ plugin: 'context-control', key: 'settings' } as const, DEFAULTS)
+const shownFill = atom({ plugin: 'context-control', key: 'shownFill' } as const, 0)
+const isAlerted = atom({ plugin: 'context-control', key: 'isAlerted' } as const, false)
+const error = atom({ plugin: 'context-control', key: 'error' } as const, '')
 
 type $ = EngineInterface
 type Els = Elements[keyof Elements]
@@ -40,7 +40,7 @@ type View = {
   avg?: number
   turns?: number
   b: Breakdown | null
-  s: MeterSettings
+  s: ControlSettings
   from: number
 }
 
@@ -113,7 +113,7 @@ async function refresh($: $, ctx?: SessionContextUsage) {
   }
 }
 
-async function saveSettings($: $, patch: Partial<MeterSettings>) {
+async function saveSettings($: $, patch: Partial<ControlSettings>) {
   const next = await update($, settings, s => ({ ...s, ...patch }))
   await $.store.set('settings', next)
   if (patch.exactCounts !== undefined || patch.warnAt !== undefined || patch.alertAt !== undefined) void refresh($)
@@ -252,13 +252,13 @@ function legend(els: Els, b: Breakdown, columns: 1 | 2) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    const stored = (await $.store.get('settings')) as Partial<MeterSettings> | undefined
-    const s: MeterSettings = { ...DEFAULTS, ...(stored ?? {}) }
+    const stored = (await $.store.get('settings')) as Partial<ControlSettings> | undefined
+    const s: ControlSettings = { ...DEFAULTS, ...(stored ?? {}) }
     await update($, settings, () => s)
     await update($, expanded, () => s.startExpanded)
     await $.command.register({
-      name: 'context-meter',
-      description: 'Open the Context Meter pane: breakdown, history, compactions and settings',
+      name: 'context-control',
+      description: 'Open the Context Control pane: breakdown, history, compactions and settings',
     })
     void refresh($)
     if (s.openPaneOnStart) void openPane($)
@@ -287,9 +287,9 @@ export const register: Register = on => {
     return aroundCompact($, { trigger: e.trigger, focus: e.instructions, messages: e.messages }, () => next(e))
   }).catch(($, e, next) => next(e))
 
-  on('command.run', { command: 'context-meter' }, async $ => {
+  on('command.run', { command: 'context-control' }, async $ => {
     await openPane($)
-    return { text: 'Opened the Context Meter pane.' }
+    return { text: 'Opened the Context Control pane.' }
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -471,7 +471,7 @@ export const register: Register = on => {
       const root = await $.session.root()
       const sep = root.includes('\\') ? '\\' : '/'
       const resolved = /^([a-zA-Z]:[\\/]|[\\/])/.test(s.snapshotDir) ? s.snapshotDir : `${root}${sep}${s.snapshotDir.replace(/[\\/]/g, sep)}`
-      const toggleRow = (key: keyof MeterSettings & string, label: string, value: boolean, hint?: string) => (
+      const toggleRow = (key: keyof ControlSettings & string, label: string, value: boolean, hint?: string) => (
         <Box flexDirection="column">
           <Box flexDirection="row" alignItems="center" columnGap={2}>
             <Box flexGrow={1}>

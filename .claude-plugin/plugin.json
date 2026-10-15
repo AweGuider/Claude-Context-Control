@@ -1,10 +1,10 @@
 {
-  "name": "context-meter",
+  "name": "context-control",
   "version": "0.1.0",
-  "description": "Context window meter above the prompt: fill, what fills it, turns until auto-compact, a breakdown pane, compact with focus, and optional pre-compact snapshots.",
+  "description": "Context window control above the prompt: fill, what fills it, turns until auto-compact, a breakdown pane, compact with focus, and optional pre-compact snapshots.",
   "author": { "name": "AweDev", "url": "https://github.com/AweGuider" },
-  "homepage": "https://github.com/AweGuider/claude-context-lens",
-  "repository": "https://github.com/AweGuider/claude-context-lens",
+  "homepage": "https://github.com/AweGuider/Claude-Context-Control",
+  "repository": "https://github.com/AweGuider/Claude-Context-Control",
   "license": "MIT",
   "keywords": ["context", "compact", "tokens", "mod"],
   "types": "./types/index.d.ts"

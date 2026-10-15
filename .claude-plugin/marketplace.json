@@ -4,9 +4,9 @@
   "description": "Claude Code mods by AweDev.",
   "plugins": [
     {
-      "name": "context-meter",
+      "name": "context-control",
       "source": "./",
-      "description": "Context window meter above the prompt, with a breakdown pane, compact with focus, and optional pre-compact snapshots."
+      "description": "Context window control above the prompt, with a breakdown pane, compact with focus, and optional pre-compact snapshots."
     }
   ]
 }
