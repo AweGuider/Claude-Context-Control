@@ -5,8 +5,11 @@
   "plugins": [
     {
       "name": "context-control",
+      "displayName": "Context Control",
       "source": "./",
-      "description": "Context window control above the prompt, with a breakdown pane, compact with focus, and optional pre-compact snapshots."
+      "description": "See what fills Claude Code's context window, how many turns until auto-compact, and compact with a focus. Live band above the prompt, breakdown pane, optional pre-compact snapshots.",
+      "category": "productivity",
+      "tags": ["context", "context-window", "compact", "tokens", "usage"]
     }
   ]
 }

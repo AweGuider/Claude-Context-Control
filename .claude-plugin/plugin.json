@@ -1,11 +1,16 @@
 {
   "name": "context-control",
-  "version": "0.1.0",
-  "description": "Context window control above the prompt: fill, what fills it, turns until auto-compact, a breakdown pane, compact with focus, and optional pre-compact snapshots.",
+  "displayName": "Context Control",
+  "version": "0.1.1",
+  "description": "See what fills Claude Code's context window, how many turns until auto-compact, and compact with a focus. Live band above the prompt, breakdown pane, optional pre-compact snapshots.",
   "author": { "name": "AweDev", "url": "https://github.com/AweGuider" },
   "homepage": "https://github.com/AweGuider/Claude-Context-Control",
   "repository": "https://github.com/AweGuider/Claude-Context-Control",
   "license": "MIT",
-  "keywords": ["context", "compact", "tokens", "mod"],
+  "keywords": ["context", "context-window", "compact", "auto-compact", "tokens", "claude-code", "mod"],
+  "icon": "./docs/images/icon.png",
+  "documentationUrl": "https://github.com/AweGuider/Claude-Context-Control#readme",
+  "supportUrl": "https://github.com/AweGuider/Claude-Context-Control/issues",
+  "privacyPolicyUrl": "https://github.com/AweGuider/Claude-Context-Control/blob/main/PRIVACY.md",
   "types": "./types/index.d.ts"
 }

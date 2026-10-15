@@ -1,6 +1,6 @@
-<p align="center">
-  <img src="docs/images/banner.png" width="100%" alt="Context Control: what fills Claude's context window, turns left until auto-compact, and a focused Compact">
-</p>
+![Context Control: what fills Claude's context window, turns left until auto-compact, and a focused Compact](docs/images/banner.png)
+
+# Context Control: context window meter and Compact for Claude Code
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/AweGuider/Claude-Context-Control" alt="License"></a>
@@ -11,13 +11,14 @@
 <p align="center">
   <a href="#install">Install</a> ·
   <a href="#what-it-does">What it does</a> ·
+  <a href="#comparison">Comparison</a> ·
   <a href="#settings">Settings</a> ·
-  <a href="#snapshots">Snapshots</a> ·
-  <a href="#privacy-and-cost">Privacy and cost</a> ·
-  <a href="#development">Development</a>
+  <a href="#what-it-reads-sends-and-writes">Privacy</a> ·
+  <a href="#faq">FAQ</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
 </p>
 
-A Claude Code mod that puts your context window above the prompt: how full it is, what fills it, how many turns until auto-compact, and a Compact button that takes a focus.
+Context Control is a Claude Code mod that keeps your **context window** in view. A band above the prompt shows your **context usage** as you work: how full the window is, how many **tokens** each turn adds, what fills it, and how many turns are left until **auto-compact**. When you want to **compact**, a Compact button takes a focus, so the summary keeps what matters. It works in the Claude desktop app's Code tab and in the terminal.
 
 > Unofficial community mod. Not affiliated with or endorsed by Anthropic.
 
@@ -31,10 +32,23 @@ A Claude Code mod that puts your context window above the prompt: how full it is
 
 The bars animate as the numbers change: fill grows, the session chart draws in, the band breathes at the alert level and shimmers while compacting.
 
-<p align="center">
-  <img src="docs/images/band-states.png" width="100%" alt="The band in six states: calm, warn, alert, Claude is working, compacting and compacted">
-  <br><sub>Illustrative mockup of the band's states, with sample figures.</sub>
-</p>
+![The band in six states: calm, warn, alert, Claude is working, compacting and compacted](docs/images/band-states.png)
+
+<sub>Illustrative mockup of the band's states, with sample figures.</sub>
+
+## Comparison
+
+What Claude Code shows on its own, and what Context Control adds.
+
+| | Claude Code built in | Context Control |
+| --- | --- | --- |
+| Context usage always in view | Depends on the app version; some desktop builds show no context indicator, and the terminal needs a custom status line | A band above the prompt |
+| What fills the context window | `/context`, on demand | Live, by category, plus what is loaded on every turn |
+| Turns until auto-compact | Not shown | Estimated from recent growth |
+| Warning before auto-compact | A notice near the limit | Amber, then red, and one toast |
+| Compact with a focus | Type `/compact <instructions>` | A Compact button with a focus field that waits for the turn to end |
+| Snapshot before compaction | Write your own PreCompact hook | Built in, optional |
+| Context over the session and compaction history | Not shown | Side pane |
 
 ## Install
 
@@ -44,7 +58,16 @@ In a terminal Claude Code session:
 /plugin install context-control --marketplace AweGuider/Claude-Context-Control
 ```
 
-Answer `y` to add the marketplace, then pick the user scope. Installed at user scope, it also loads in sessions the Claude desktop app starts (the install command itself is terminal-only).
+Answer `y` to add the marketplace, then pick the user scope. Or, from your shell:
+
+```
+claude plugin install context-control --marketplace AweGuider/Claude-Context-Control
+```
+
+Installed at user scope, it loads in every new session, including the Claude desktop app's Code tab. In a session that is already running, type `/reload-plugins`.
+
+**Update:** `claude plugin update context-control@awedev`, then `/reload-plugins`, or press **Update** on the plugin's page in the desktop app.
+**Uninstall:** `claude plugin uninstall context-control@awedev`.
 
 Built against Claude Code 2.1.295. The mod API is early access and can change between releases.
 
@@ -69,9 +92,55 @@ In the pane's **Settings** tab; saved across sessions.
 
 When on, each compaction first writes `<project>/.claude/context-snapshots/<date>_<time>.md` with the trigger, model, context size, the focus you gave, your last 10 prompts, files edited and read, and open tasks. With **Keep snapshots out of git** on, the folder gets its own one-line `.gitignore`; your project's `.gitignore` is not touched. Old snapshots are not deleted.
 
-## Privacy and cost
+## What it reads, sends and writes
 
-The mod makes no model calls. Figures come from the session's own usage and a local estimate of the breakdown. **Exact counts** switches the breakdown to Claude Code's token-count requests (one per tool and memory file, as `/context` does) after each turn; leave it off to send nothing.
+- **Reads** the session's own usage figures (context fill, window size and the breakdown by category) and, only for a snapshot, the session's transcript.
+- **Sends** nothing by default: no network requests, no model calls, no telemetry. With **Exact counts** on (off by default), the breakdown uses Claude Code's own token-count requests, one per tool and memory file, as `/context` does, to the Anthropic API your session already uses.
+- **Writes** its settings through Claude Code's plugin storage and, only with snapshots on, Markdown files and a `.gitignore` in the snapshot folder.
+
+The full policy is in [PRIVACY.md](PRIVACY.md).
+
+## FAQ
+
+### How do I see how much context Claude Code is using?
+
+Install Context Control. The band above the prompt shows the context window's fill as a bar and a percentage, the tokens used out of the window, and how much the last turn added. Click it for the breakdown, or run `/context-control` for the pane.
+
+### Where did the context indicator and Compact button go in the Claude desktop app?
+
+Some versions of the desktop app don't show a context indicator or a Compact button above the prompt. Context Control adds both back as a mod, with more detail: what fills the context and how many turns are left until auto-compact.
+
+### How many turns do I have until Claude Code auto-compacts?
+
+The band shows it, estimated from the average growth of your last five turns (adjustable in Settings) against the auto-compact threshold. The expanded band and the pane mark that threshold on the bar.
+
+### What is taking up my context window, and how do I free some?
+
+The breakdown splits the context into messages, system prompt, system tools, MCP tools, skills, agents and memory files. The pane's **Always loaded** list ranks what you pay for on every turn, such as MCP servers and CLAUDE.md files, so you can see what to disconnect or trim.
+
+### How do I compact without losing important details?
+
+Press **Compact** and write what the summary must keep, such as "the plan and the open bugs". It runs the same compaction as `/compact <instructions>`. Turn on the pre-compact snapshot to also keep a Markdown handoff on disk.
+
+### Does it work in the terminal, VS Code and the desktop app?
+
+The band appears in the Claude desktop app's Code tab and in the terminal. The pane opens on every surface Claude Code draws on; VS Code is untested.
+
+### Does it send my data anywhere or use API credits?
+
+No. It makes no network requests and no model calls. The optional **Exact counts** setting uses the same token-count requests as `/context`; it's off by default.
+
+### Does it write anything to my disk?
+
+Only its settings, and snapshots if you turn them on. Snapshots go to a folder in your project with its own `.gitignore`.
+
+### How do I update or uninstall it?
+
+See [Install](#install). Updates arrive when the version changes; press **Update** on the plugin's page or run `claude plugin update context-control@awedev`.
+
+### Is it official?
+
+No. Context Control is an unofficial community mod by AweDev, not affiliated with or endorsed by Anthropic.
 
 ## Limitations
 
