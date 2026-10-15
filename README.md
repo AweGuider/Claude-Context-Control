@@ -1,8 +1,25 @@
-# Context Control
+<p align="center">
+  <img src="docs/images/banner.png" width="100%" alt="Context Control: what fills Claude's context window, turns left until auto-compact, and a focused Compact">
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/AweGuider/Claude-Context-Control" alt="License"></a>
+  <img src="https://img.shields.io/badge/Claude%20Code-mod-4f7cc4" alt="Claude Code mod">
+  <img src="https://img.shields.io/badge/mod%20API-early%20access-c98c2e" alt="Mod API: early access">
+</p>
+
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#what-it-does">What it does</a> ·
+  <a href="#settings">Settings</a> ·
+  <a href="#snapshots">Snapshots</a> ·
+  <a href="#privacy-and-cost">Privacy and cost</a> ·
+  <a href="#development">Development</a>
+</p>
 
 A Claude Code mod that puts your context window above the prompt: how full it is, what fills it, how many turns until auto-compact, and a Compact button that takes a focus.
 
-<!-- Screenshot: add docs/band.png (collapsed and expanded band) and docs/pane.png once captured. -->
+> Unofficial community mod. Not affiliated with or endorsed by Anthropic.
 
 ## What it does
 
@@ -13,6 +30,11 @@ A Claude Code mod that puts your context window above the prompt: how full it is
 - **Pre-compact snapshot** (off by default): before any compaction, manual or auto, writes a Markdown handoff of recent prompts, files touched and open tasks.
 
 The bars animate as the numbers change: fill grows, the session chart draws in, the band breathes at the alert level and shimmers while compacting.
+
+<p align="center">
+  <img src="docs/images/band-states.png" width="100%" alt="The band in six states: calm, warn, alert, Claude is working, compacting and compacted">
+  <br><sub>Illustrative mockup of the band's states, with sample figures.</sub>
+</p>
 
 ## Install
 
