@@ -15,7 +15,7 @@ Context Control is a Claude Code mod by AweDev. It runs inside your own Claude C
 ## What it writes
 
 - Its settings, through Claude Code's own plugin storage on your machine.
-- Pre-compact snapshots, only when you turn them on (off by default): Markdown files in `<project>/.claude/context-snapshots/`, or the folder you choose, plus a one-line `.gitignore` in that folder when **Keep snapshots out of git** is on. Snapshots stay on your machine and are never uploaded.
+- Pre-compact snapshots, only when you turn them on (off by default): Markdown files in `.claude/context-snapshots/` under the session's working directory, plus a one-line `.gitignore` in that folder when **Keep snapshots out of git** is on. Snapshots stay on your machine and are never uploaded.
 
 ## What it collects
 

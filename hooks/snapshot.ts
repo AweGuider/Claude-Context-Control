@@ -8,8 +8,6 @@ const TASK_TOOLS = new Set(['TodoWrite', 'mcp__ccd_turn__update_plan'])
 
 const pad = (n: number) => String(n).padStart(2, '0')
 
-const isAbsolute = (p: string) => /^([a-zA-Z]:[\\/]|[\\/])/.test(p)
-
 const clean = (text: string) =>
   text
     .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
@@ -51,14 +49,10 @@ function tasksOf(messages: readonly SessionMessage[]): string[] {
   return []
 }
 
-/** Where a snapshot taken at `nowMs` goes: the folder, the file, and the stamp in its name. */
-export function snapshotFile(root: string, snapshotDir: string, nowMs: number): { dir: string; sep: string; path: string; stamp: string } {
-  const sep = root.includes('\\') ? '\\' : '/'
-  const rel = snapshotDir.replace(/[\\/]+$/, '')
-  const dir = isAbsolute(rel) ? rel : `${root}${sep}${rel.replace(/[\\/]/g, sep)}`
+/** The snapshot's file name stamp for a time: `2026-10-15_164705`. */
+export function snapshotStamp(nowMs: number): string {
   const now = new Date(nowMs)
-  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
-  return { dir, sep, path: `${dir}${sep}${stamp}.md`, stamp }
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
 }
 
 /** The Markdown handoff of the conversation about to be compacted. */

@@ -3,7 +3,7 @@ import type { Elements, EngineInterface, Register, SessionCompactResult, Session
 
 import { DEFAULTS, TEXT_TONE, TONE, clampPercent, fmt, fmtDelta, fmtWindow, growth, levelOf, limitOf, toBreakdown, turnsLeft } from './model'
 import type { Level } from './model'
-import { snapshotFile, snapshotText } from './snapshot'
+import { snapshotStamp, snapshotText } from './snapshot'
 import { compositionBar, rankBar, sparkline, windowBar } from './svg'
 import type { Breakdown, Compaction, Point, Reading, ControlSettings } from '../types'
 
@@ -122,23 +122,22 @@ async function saveSettings($: Engine, patch: Partial<ControlSettings>) {
 
 /**
  * Writes the snapshot; the engine follows `$` only into functions of this file,
- * so the I/O lives here and snapshot.ts only builds the text and the path.
+ * so the I/O lives here and snapshot.ts only builds the text.
  */
 async function writeSnapshot(
   $: Engine,
   o: { messages: readonly SessionMessage[]; trigger: string; focus?: string; reading: Reading | null; settings: ControlSettings },
 ): Promise<string> {
-  const root = await $.session.root()
-  const now = await $.clock.now()
+  const stamp = snapshotStamp(await $.clock.now())
   const sessionId = await $.session.id()
   const model = await $.session.model()
-  const file = snapshotFile(root, o.settings.snapshotDir, now)
-  await $.fs.write(file.path, snapshotText({ stamp: file.stamp, trigger: o.trigger, sessionId, model, reading: o.reading, focus: o.focus, messages: o.messages }))
-  if (o.settings.snapshotGitignore) {
-    const ignore = `${file.dir}${file.sep}.gitignore`
-    if (!(await $.fs.exists(ignore))) await $.fs.write(ignore, '*\n')
+  const text = snapshotText({ stamp, trigger: o.trigger, sessionId, model, reading: o.reading, focus: o.focus, messages: o.messages })
+  // Fixed paths, relative to the working directory, so the plugin directory can read what is written.
+  await $.fs.write(`.claude/context-snapshots/${stamp}.md`, text)
+  if (o.settings.snapshotGitignore && !(await $.fs.exists('.claude/context-snapshots/.gitignore'))) {
+    await $.fs.write('.claude/context-snapshots/.gitignore', '*\n')
   }
-  return file.path
+  return `.claude/context-snapshots/${stamp}.md`
 }
 
 /**
@@ -464,7 +463,7 @@ export const register: Register = on => {
             />
           ) : null}
           <Box flexDirection="row" columnGap={2} alignItems="center">
-            <Text dimColor>{s.snapshot ? `Snapshot first → ${s.snapshotDir}/` : 'No snapshot · turn it on in the pane’s Settings'}</Text>
+            <Text dimColor>{s.snapshot ? 'Snapshot first → .claude/context-snapshots/' : 'No snapshot · turn it on in the pane’s Settings'}</Text>
             <Box flexGrow={1} />
             <Button key="cancel" label="Cancel" onPress={() => update($, composing, () => false)} />
             <Button key="go" label="Compact" variant="primary" onPress={async () => compactNow($, await read($, draft))} />
@@ -498,9 +497,7 @@ export const register: Register = on => {
 
     if (current === 'settings') {
       const s = await read($, settings)
-      const root = await $.session.root()
-      const sep = root.includes('\\') ? '\\' : '/'
-      const resolved = /^([a-zA-Z]:[\\/]|[\\/])/.test(s.snapshotDir) ? s.snapshotDir : `${root}${sep}${s.snapshotDir.replace(/[\\/]/g, sep)}`
+      const cwd = await $.session.cwd()
       const toggleRow = (key: keyof ControlSettings & string, label: string, value: boolean, hint?: string) => (
         <Box flexDirection="column">
           <Box flexDirection="row" alignItems="center" columnGap={2}>
@@ -571,19 +568,7 @@ export const register: Register = on => {
           )}
           {heading('Pre-compact snapshot')}
           {toggleRow('snapshot', 'Save a snapshot before each compaction', s.snapshot, 'A Markdown handoff built from the transcript (recent prompts, files touched, open tasks). No model calls.')}
-          {'Input' in els ? (
-            <els.Input
-              key="set-snapshotDir"
-              label="Folder (relative to the project root, or absolute)"
-              value={s.snapshotDir}
-              submitLabel="Set"
-              onSubmit={value => {
-                const dir = value.trim()
-                if (dir) void saveSettings($, { snapshotDir: dir })
-              }}
-            />
-          ) : null}
-          <Text dimColor>{`→ ${resolved}`}</Text>
+          <Text dimColor>{`Folder: .claude/context-snapshots/ in ${cwd}`}</Text>
           {toggleRow('snapshotGitignore', 'Keep snapshots out of git', s.snapshotGitignore, 'Writes a one-line .gitignore inside the snapshot folder; the project’s own .gitignore is untouched.')}
         </Box>
       )

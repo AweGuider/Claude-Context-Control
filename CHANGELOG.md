@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.3 (2026-10-15)
+
+- Snapshots now always go to `.claude/context-snapshots/` in the session's working directory. The **Snapshot folder** setting is removed, so the plugin directory can read exactly which files the mod writes.
+- README and privacy policy: an explicit list of the files the mod writes, what its compaction hook does, and what its one command does.
+
 ## 0.1.2 (2026-10-15)
 
 - Fixed: the mod didn't load ("hooks module did not load"). Claude Code follows the mod's engine handle only into functions in the same file, so the snapshot writer's file access moved into the main module.

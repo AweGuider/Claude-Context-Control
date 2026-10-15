@@ -12,7 +12,6 @@ export const DEFAULTS: ControlSettings = {
   averageOver: 5,
   exactCounts: false,
   snapshot: false,
-  snapshotDir: '.claude/context-snapshots',
   snapshotGitignore: true,
 }
 

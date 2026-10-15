@@ -37,7 +37,6 @@ export type ControlSettings = {
   averageOver: number
   exactCounts: boolean
   snapshot: boolean
-  snapshotDir: string
   snapshotGitignore: boolean
 }
 

@@ -85,18 +85,19 @@ In the pane's **Settings** tab; saved across sessions.
 | Turns-left estimate averages the last | 5 turns |
 | Exact counts | Off |
 | Pre-compact snapshot | Off |
-| Snapshot folder | `.claude/context-snapshots` (relative to the project root, or absolute) |
 | Keep snapshots out of git | On |
 
 ## Snapshots
 
-When on, each compaction first writes `<project>/.claude/context-snapshots/<date>_<time>.md` with the trigger, model, context size, the focus you gave, your last 10 prompts, files edited and read, and open tasks. With **Keep snapshots out of git** on, the folder gets its own one-line `.gitignore`; your project's `.gitignore` is not touched. Old snapshots are not deleted.
+When on, each compaction first writes `.claude/context-snapshots/<date>_<time>.md` in the session's working directory (normally the project root) with the trigger, model, context size, the focus you gave, your last 10 prompts, files edited and read, and open tasks. The folder is fixed. With **Keep snapshots out of git** on, the mod also writes `.claude/context-snapshots/.gitignore` containing `*`, a file git reads to ignore the snapshots; your project's own `.gitignore` is not touched. Old snapshots are not deleted.
 
 ## What it reads, sends and writes
 
 - **Reads** the session's own usage figures (context fill, window size and the breakdown by category) and, only for a snapshot, the session's transcript.
 - **Sends** nothing by default: no network requests, no model calls, no telemetry. With **Exact counts** on (off by default), the breakdown uses Claude Code's own token-count requests, one per tool and memory file, as `/context` does, to the Anthropic API your session already uses.
-- **Writes** its settings through Claude Code's plugin storage and, only with snapshots on, Markdown files and a `.gitignore` in the snapshot folder.
+- **Writes** its settings through Claude Code's plugin storage and, only with snapshots on, two kinds of file in `.claude/context-snapshots/` under the working directory: the snapshot Markdown files and, with **Keep snapshots out of git** on, a `.gitignore` that tells git to ignore that folder. It writes no other file.
+- **Hooks compaction** (`session.compact`) only to save the snapshot first and to record the compaction in its history. It passes every compaction on unchanged and never delays, edits or blocks it.
+- **Adds one command**, `/context-control`, which opens the mod's pane and does nothing else.
 
 The full policy is in [PRIVACY.md](PRIVACY.md).
 
@@ -132,7 +133,7 @@ No. It makes no network requests and no model calls. The optional **Exact counts
 
 ### Does it write anything to my disk?
 
-Only its settings, and snapshots if you turn them on. Snapshots go to a folder in your project with its own `.gitignore`.
+Only its settings, and snapshots if you turn them on. Snapshots go to `.claude/context-snapshots/` in your project, with a `.gitignore` there that keeps them out of git.
 
 ### How do I update or uninstall it?
 

@@ -128,7 +128,7 @@ test('a snapshot is written before compaction when turned on', async ($, on) => 
   const state = { tokens: 300_000 }
   engine(on, state)
   const written = new Map<string, string>()
-  on('session.root', () => ({ value: 'C:\\work' }))
+  on('session.cwd', () => ({ value: 'C:\\work' }))
   on('session.id', () => ({ value: 'abc' }))
   on('session.model', () => ({ value: 'Opus 5.5' }))
   on('fs.exists', ($, e) => ({ value: written.has(e.path) }))
@@ -151,8 +151,9 @@ test('a snapshot is written before compaction when turned on', async ($, on) => 
   ]
   await $.session.compact({ trigger: 'manual', instructions: 'keep the plan', messages })
   const file = [...written.keys()].find(p => p.endsWith('.md'))
-  expect(file).toMatch(/^C:\\work\\\.claude\\context-snapshots\\2026-10-15_\d{6}\.md$/)
+  expect(file).toMatch(/[\\/]\.claude[\\/]context-snapshots[\\/]2026-10-15_\d{6}\.md$/)
   expect(written.get(file!)).toContain('Build the context control')
   expect(written.get(file!)).toContain('C:\\work\\a.ts')
-  expect(written.has('C:\\work\\.claude\\context-snapshots\\.gitignore')).toBe(true)
+  const ignore = [...written.keys()].find(p => /[\\/]\.claude[\\/]context-snapshots[\\/]\.gitignore$/.test(p))
+  expect(written.get(ignore!)).toBe('*\n')
 })
