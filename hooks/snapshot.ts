@@ -1,7 +1,7 @@
-import type { EngineInterface, SessionMessage } from 'claude-code'
+import type { SessionMessage } from 'claude-code'
 
 import { fmt } from './model'
-import type { Reading, ControlSettings } from '../types'
+import type { Reading } from '../types'
 
 const EDITS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 const TASK_TOOLS = new Set(['TodoWrite', 'mcp__ccd_turn__update_plan'])
@@ -51,32 +51,38 @@ function tasksOf(messages: readonly SessionMessage[]): string[] {
   return []
 }
 
-/** Writes a Markdown handoff of the conversation about to be compacted; returns the file's path. */
-export async function writeSnapshot(
-  $: EngineInterface,
-  o: { messages: readonly SessionMessage[]; trigger: string; focus?: string; reading: Reading | null; settings: ControlSettings },
-): Promise<string> {
-  const root = await $.session.root()
+/** Where a snapshot taken at `nowMs` goes: the folder, the file, and the stamp in its name. */
+export function snapshotFile(root: string, snapshotDir: string, nowMs: number): { dir: string; sep: string; path: string; stamp: string } {
   const sep = root.includes('\\') ? '\\' : '/'
-  const rel = o.settings.snapshotDir.replace(/[\\/]+$/, '')
+  const rel = snapshotDir.replace(/[\\/]+$/, '')
   const dir = isAbsolute(rel) ? rel : `${root}${sep}${rel.replace(/[\\/]/g, sep)}`
-  const now = new Date(await $.clock.now())
+  const now = new Date(nowMs)
   const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
-  const path = `${dir}${sep}${stamp}.md`
+  return { dir, sep, path: `${dir}${sep}${stamp}.md`, stamp }
+}
 
-  const [id, model] = await Promise.all([$.session.id(), $.session.model()])
+/** The Markdown handoff of the conversation about to be compacted. */
+export function snapshotText(o: {
+  stamp: string
+  trigger: string
+  sessionId: string
+  model: string
+  reading: Reading | null
+  focus?: string
+  messages: readonly SessionMessage[]
+}): string {
   const r = o.reading
   const size = r?.tokens !== undefined ? `${fmt(r.tokens)} of ${fmt(r.window)} (${r.percent ?? Math.round((r.tokens / r.window) * 100)}%)` : 'unknown'
   const files = filesOf(o.messages)
   const tasks = tasksOf(o.messages)
   const prompts = promptsOf(o.messages, 10)
 
-  const lines = [
-    `# Context snapshot — ${stamp.replace('_', ' ')}`,
+  return [
+    `# Context snapshot — ${o.stamp.replace('_', ' ')}`,
     '',
     `- Trigger: ${o.trigger}`,
-    `- Session: ${id}`,
-    `- Model: ${model}`,
+    `- Session: ${o.sessionId}`,
+    `- Model: ${o.model}`,
     `- Context before compaction: ${size}`,
     ...(o.focus ? [`- Focus: ${o.focus}`] : []),
     '',
@@ -89,11 +95,5 @@ export async function writeSnapshot(
     ...(files.read.length ? ['Read:', ...files.read.slice(-40).map(f => `- ${f}`), ''] : []),
     ...(files.edited.length + files.read.length === 0 ? ['None recorded.', ''] : []),
     ...(tasks.length ? ['## Open tasks', '', ...tasks, ''] : []),
-  ]
-
-  await $.fs.write(path, lines.join('\n'))
-  if (o.settings.snapshotGitignore && !(await $.fs.exists(`${dir}${sep}.gitignore`))) {
-    await $.fs.write(`${dir}${sep}.gitignore`, '*\n')
-  }
-  return path
+  ].join('\n')
 }

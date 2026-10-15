@@ -3,7 +3,7 @@ import type { Elements, EngineInterface, Register, SessionCompactResult, Session
 
 import { DEFAULTS, TEXT_TONE, TONE, clampPercent, fmt, fmtDelta, fmtWindow, growth, levelOf, limitOf, toBreakdown, turnsLeft } from './model'
 import type { Level } from './model'
-import { writeSnapshot } from './snapshot'
+import { snapshotFile, snapshotText } from './snapshot'
 import { compositionBar, rankBar, sparkline, windowBar } from './svg'
 import type { Breakdown, Compaction, Point, Reading, ControlSettings } from '../types'
 
@@ -23,7 +23,8 @@ const shownFill = atom({ plugin: 'context-control', key: 'shownFill' } as const,
 const isAlerted = atom({ plugin: 'context-control', key: 'isAlerted' } as const, false)
 const error = atom({ plugin: 'context-control', key: 'error' } as const, '')
 
-type $ = EngineInterface
+// Not `$`: the engine and the directory read that name as the capability object.
+type Engine = EngineInterface
 type Els = Elements[keyof Elements]
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
@@ -44,7 +45,7 @@ type View = {
   from: number
 }
 
-async function viewOf($: $): Promise<View | null> {
+async function viewOf($: Engine): Promise<View | null> {
   const r = await read($, reading)
   if (r === null) return null
   const [b, s, points, from] = await Promise.all([read($, breakdown), read($, settings), read($, history), read($, shownFill)])
@@ -68,7 +69,7 @@ async function viewOf($: $): Promise<View | null> {
   }
 }
 
-async function ingest($: $, ctx: SessionContextUsage) {
+async function ingest($: Engine, ctx: SessionContextUsage) {
   const before = await read($, reading)
   const next: Reading = { tokens: ctx.tokens, window: ctx.window, percent: ctx.percent }
   await update($, shownFill, () => (before?.tokens !== undefined ? (before.tokens / before.window) * 100 : 0))
@@ -100,7 +101,7 @@ async function ingest($: $, ctx: SessionContextUsage) {
   }
 }
 
-async function refresh($: $, ctx?: SessionContextUsage) {
+async function refresh($: Engine, ctx?: SessionContextUsage) {
   try {
     const s = await read($, settings)
     const usage = await $.session.usage({ breakdown: s.exactCounts ? 'full' : 'summary' })
@@ -113,10 +114,31 @@ async function refresh($: $, ctx?: SessionContextUsage) {
   }
 }
 
-async function saveSettings($: $, patch: Partial<ControlSettings>) {
+async function saveSettings($: Engine, patch: Partial<ControlSettings>) {
   const next = await update($, settings, s => ({ ...s, ...patch }))
   await $.store.set('settings', next)
   if (patch.exactCounts !== undefined || patch.warnAt !== undefined || patch.alertAt !== undefined) void refresh($)
+}
+
+/**
+ * Writes the snapshot; the engine follows `$` only into functions of this file,
+ * so the I/O lives here and snapshot.ts only builds the text and the path.
+ */
+async function writeSnapshot(
+  $: Engine,
+  o: { messages: readonly SessionMessage[]; trigger: string; focus?: string; reading: Reading | null; settings: ControlSettings },
+): Promise<string> {
+  const root = await $.session.root()
+  const now = await $.clock.now()
+  const sessionId = await $.session.id()
+  const model = await $.session.model()
+  const file = snapshotFile(root, o.settings.snapshotDir, now)
+  await $.fs.write(file.path, snapshotText({ stamp: file.stamp, trigger: o.trigger, sessionId, model, reading: o.reading, focus: o.focus, messages: o.messages }))
+  if (o.settings.snapshotGitignore) {
+    const ignore = `${file.dir}${file.sep}.gitignore`
+    if (!(await $.fs.exists(ignore))) await $.fs.write(ignore, '*\n')
+  }
+  return file.path
 }
 
 /**
@@ -125,7 +147,7 @@ async function saveSettings($: $, patch: Partial<ControlSettings>) {
  * `$.session.compact` past that plugin's own hook, so the button does this itself.
  */
 async function aroundCompact(
-  $: $,
+  $: Engine,
   o: { trigger: string; focus?: string; messages: readonly SessionMessage[] },
   run: () => Promise<SessionCompactResult>,
 ): Promise<SessionCompactResult> {
@@ -135,10 +157,11 @@ async function aroundCompact(
   try {
     let snapshot: string | undefined
     if (s.snapshot) {
-      snapshot = await writeSnapshot($, { messages: o.messages, trigger: o.trigger, focus: o.focus, reading: before, settings: s }).catch(err => {
+      try {
+        snapshot = await writeSnapshot($, { messages: o.messages, trigger: o.trigger, focus: o.focus, reading: before, settings: s })
+      } catch (err) {
         $.ui.toast(`Snapshot not saved: ${message(err)}`)
-        return undefined
-      })
+      }
     }
     const result = await run()
     if (result.skip !== undefined) {
@@ -165,12 +188,17 @@ async function aroundCompact(
 
 const asMessages = (found: unknown): readonly SessionMessage[] => (Array.isArray(found) ? found : [])
 
-async function compactNow($: $, focus: string) {
+async function compactNow($: Engine, focus: string) {
   await update($, composing, () => false)
   await update($, draft, () => '')
   const text = focus.trim()
   try {
-    const messages = asMessages(await $.session.messages().catch(() => []))
+    let messages: readonly SessionMessage[] = []
+    try {
+      messages = asMessages(await $.session.messages())
+    } catch {
+      messages = []
+    }
     const result = await aroundCompact($, { trigger: 'manual', focus: text || undefined, messages }, () =>
       $.session.compact(text ? { instructions: text } : {}),
     )
@@ -180,7 +208,9 @@ async function compactNow($: $, focus: string) {
   }
 }
 
-const openPane = ($: $) => $.ui.open({ id: PANE, title: 'Context' })
+function openPane($: Engine) {
+  return $.ui.open({ id: PANE, title: 'Context' })
+}
 
 const textBar = (pct: number, cells: number) => {
   const filled = Math.round((clampPercent(pct) / 100) * cells)

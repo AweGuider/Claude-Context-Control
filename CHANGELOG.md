@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 (2026-10-15)
+
+- Fixed: the mod didn't load ("hooks module did not load"). Claude Code follows the mod's engine handle only into functions in the same file, so the snapshot writer's file access moved into the main module.
+- Clears the plugin directory's blocking check on how the mod uses its engine handle.
+
 ## 0.1.1 (2026-10-15)
 
 - Shown as **Context Control** in plugin listings, with a new description, a category and tags.
