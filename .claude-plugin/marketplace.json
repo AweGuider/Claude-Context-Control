@@ -1,0 +1,12 @@
+{
+  "name": "awedev",
+  "owner": { "name": "AweDev", "url": "https://github.com/AweGuider" },
+  "description": "Claude Code mods by AweDev.",
+  "plugins": [
+    {
+      "name": "context-meter",
+      "source": "./",
+      "description": "Context window meter above the prompt, with a breakdown pane, compact with focus, and optional pre-compact snapshots."
+    }
+  ]
+}

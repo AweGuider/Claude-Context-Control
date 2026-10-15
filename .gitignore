@@ -1,0 +1,3 @@
+# Laid by Claude Code each time it loads the mod; specific to the installed build.
+.claude-plugin/types/
+tsconfig.json
