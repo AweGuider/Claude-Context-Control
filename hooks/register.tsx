@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, SessionCompactResult, SessionContextUsage, SessionMessage } from 'claude-code'
 
-import { DEFAULTS, TEXT_TONE, TONE, clampPercent, fmt, fmtDelta, fmtWindow, growth, levelOf, limitOf, toBreakdown, turnsLeft } from './model'
+import { DEFAULTS, TEXT_TONE, TONE, clampPercent, estimatedAvg, fmt, fmtDelta, fmtWindow, growth, levelOf, limitOf, toBreakdown, turnsLeft } from './model'
 import type { Level } from './model'
 import { snapshotStamp, snapshotText } from './snapshot'
 import { compositionBar, rankBar, sparkline, windowBar } from './svg'
@@ -20,6 +20,7 @@ const draft = atom({ plugin: 'context-control', key: 'draft' } as const, '')
 const tab = atom({ plugin: 'context-control', key: 'tab' } as const, 'overview')
 const settings = atom({ plugin: 'context-control', key: 'settings' } as const, DEFAULTS)
 const shownFill = atom({ plugin: 'context-control', key: 'shownFill' } as const, 0)
+const turnCount = atom({ plugin: 'context-control', key: 'turnCount' } as const, null)
 const isAlerted = atom({ plugin: 'context-control', key: 'isAlerted' } as const, false)
 const error = atom({ plugin: 'context-control', key: 'error' } as const, '')
 
@@ -29,16 +30,22 @@ type Els = Elements[keyof Elements]
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
+const HISTORY_KEY = 'history:'
+const KEEP_HISTORIES = 20
+
 /** Everything a drawing needs, derived once per draw. */
 type View = {
   r: Reading
   tokens?: number
+  /** `tokens` is the breakdown's estimate: Claude Code has reported no count yet. */
+  isEstimate: boolean
   pct?: number
   limit: number
   limitPct?: number
   level: Level
   last?: number
   avg?: number
+  isAvgEstimate: boolean
   turns?: number
   b: Breakdown | null
   s: ControlSettings
@@ -48,20 +55,24 @@ type View = {
 async function viewOf($: Engine): Promise<View | null> {
   const r = await read($, reading)
   if (r === null) return null
-  const [b, s, points, from] = await Promise.all([read($, breakdown), read($, settings), read($, history), read($, shownFill)])
+  const [b, s, points, from, prompts] = await Promise.all([read($, breakdown), read($, settings), read($, history), read($, shownFill), read($, turnCount)])
   const limit = limitOf(r, b)
-  const tokens = r.tokens
-  const pct = tokens === undefined ? undefined : (r.percent ?? Math.round((tokens / r.window) * 100))
-  const { last, avg } = growth(points, s.averageOver)
+  const isEstimate = r.tokens === undefined && b !== null
+  const tokens = r.tokens ?? b?.estimate
+  const pct = tokens === undefined ? undefined : isEstimate ? Math.round((tokens / r.window) * 100) : (r.percent ?? Math.round((tokens / r.window) * 100))
+  const measured = growth(points, s.averageOver)
+  const avg = measured.avg ?? estimatedAvg(b, prompts)
   return {
     r,
     tokens,
+    isEstimate,
     pct,
     limit,
     limitPct: b?.threshold !== undefined ? (b.threshold / r.window) * 100 : undefined,
     level: tokens === undefined ? 'calm' : levelOf(tokens, limit, s),
-    last,
+    last: measured.last,
     avg,
+    isAvgEstimate: measured.avg === undefined && avg !== undefined,
     turns: tokens === undefined ? undefined : turnsLeft(tokens, limit, avg),
     b,
     s,
@@ -69,31 +80,56 @@ async function viewOf($: Engine): Promise<View | null> {
   }
 }
 
-async function ingest($: Engine, ctx: SessionContextUsage) {
-  const before = await read($, reading)
+/** The session's history as last saved, so a resume or restart keeps Last turn and Avg. */
+async function loadHistory($: Engine): Promise<Point[]> {
+  const saved = (await $.store.get(HISTORY_KEY + (await $.session.id()))) as { points?: Point[] } | undefined
+  return Array.isArray(saved?.points) ? saved.points : []
+}
+
+async function saveHistory($: Engine, points: Point[]) {
+  await $.store.set(HISTORY_KEY + (await $.session.id()), { at: await $.clock.now(), points })
+}
+
+/** Keeps the newest KEEP_HISTORIES sessions' histories; the store is one file for every session. */
+async function pruneHistories($: Engine) {
+  const keys = (await $.store.keys()).filter(k => k.startsWith(HISTORY_KEY))
+  if (keys.length <= KEEP_HISTORIES) return
+  const dated = await Promise.all(keys.map(async k => ({ k, at: Number(((await $.store.get(k)) as { at?: number } | undefined)?.at ?? 0) })))
+  dated.sort((a, b) => b.at - a.at)
+  for (const { k } of dated.slice(KEEP_HISTORIES)) await $.store.delete(k)
+}
+
+/** `isSeed`: the first reading after the mod started watching; turns before it went unseen. */
+async function ingest($: Engine, ctx: SessionContextUsage, isSeed = false) {
+  const [before, b] = await Promise.all([read($, reading), read($, breakdown)])
   const next: Reading = { tokens: ctx.tokens, window: ctx.window, percent: ctx.percent }
-  await update($, shownFill, () => (before?.tokens !== undefined ? (before.tokens / before.window) * 100 : 0))
+  const shown = before?.tokens ?? b?.estimate
+  await update($, shownFill, () => (shown !== undefined && before ? (shown / before.window) * 100 : 0))
   await update($, reading, () => next)
   if (next.tokens === undefined) return
   const tokens = next.tokens
 
   const wasCompacted = (await read($, phase)) === 'compacted'
   if (wasCompacted) await update($, phase, () => 'idle')
-  await update($, history, list => {
-    const lastPoint = list.at(-1)
-    if (!wasCompacted && lastPoint?.tokens === tokens) return list
-    const point: Point = wasCompacted ? { tokens, isCompaction: true } : { tokens }
-    return [...list, point].slice(-300)
-  })
+  const list = await read($, history)
+  const lastPoint = list.at(-1)
+  if (!wasCompacted && lastPoint?.tokens === tokens) return
+  const point: Point = wasCompacted ? { tokens, isCompaction: true } : isSeed && lastPoint ? { tokens, isGap: true } : { tokens }
+  const points = await update($, history, () => [...list, point].slice(-300))
+  await saveHistory($, points)
+}
 
-  const [s, b, points] = await Promise.all([read($, settings), read($, breakdown), read($, history)])
-  const limit = limitOf(next, b)
+async function checkAlert($: Engine) {
+  const [r, s, b, points] = await Promise.all([read($, reading), read($, settings), read($, breakdown), read($, history)])
+  const tokens = r?.tokens
+  if (r === null || tokens === undefined) return
+  const limit = limitOf(r, b)
   const level = levelOf(tokens, limit, s)
   if (level === 'alert' && !(await read($, isAlerted))) {
     await update($, isAlerted, () => true)
     if (s.toastOnAlert) {
       const turns = turnsLeft(tokens, limit, growth(points, s.averageOver).avg)
-      const pct = next.percent ?? Math.round((tokens / next.window) * 100)
+      const pct = r.percent ?? Math.round((tokens / r.window) * 100)
       $.ui.toast(`Context at ${pct}%${turns !== undefined ? ` — auto-compact in ~${turns} ${turns === 1 ? 'turn' : 'turns'}` : ''}`, { timeoutMs: 6000 })
     }
   } else if (level === 'calm') {
@@ -101,17 +137,34 @@ async function ingest($: Engine, ctx: SessionContextUsage) {
   }
 }
 
-async function refresh($: Engine, ctx?: SessionContextUsage) {
+/**
+ * The plain usage call is free and quick, so the band draws from it first;
+ * the breakdown (the slow part) and the prompt count follow.
+ */
+async function refresh($: Engine, ctx?: SessionContextUsage, isSeed = false) {
   try {
+    await ingest($, ctx ?? (await $.session.usage()).context, isSeed)
     const s = await read($, settings)
-    const usage = await $.session.usage({ breakdown: s.exactCounts ? 'full' : 'summary' })
-    const found = usage.context.breakdown
+    const found = (await $.session.usage({ breakdown: s.exactCounts ? 'full' : 'summary' })).context.breakdown
     if (found) await update($, breakdown, () => toBreakdown(found, s.exactCounts))
-    await ingest($, ctx ?? usage.context)
+    await checkAlert($)
+    const prompts = await $.session.turns()
+    await update($, turnCount, () => prompts)
     await update($, error, () => '')
   } catch (err) {
     await update($, error, () => message(err))
   }
+}
+
+async function startWatching($: Engine) {
+  try {
+    const saved = await loadHistory($)
+    await update($, history, () => saved)
+  } catch (err) {
+    await update($, error, () => message(err))
+  }
+  await refresh($, undefined, true)
+  await pruneHistories($).catch(() => {})
 }
 
 async function saveSettings($: Engine, patch: Partial<ControlSettings>) {
@@ -221,6 +274,8 @@ const share = (part: number, whole: number) => {
   return p > 0 && p < 1 ? '<1%' : `${Math.round(p)}%`
 }
 
+const approx = (isEstimate: boolean) => (isEstimate ? '~' : '')
+
 function windowSvg(els: Els, v: View, o: { width?: number; height: number; compacting: boolean }) {
   const to = v.tokens === undefined ? 0 : (v.tokens / v.r.window) * 100
   if (!('Svg' in els)) {
@@ -238,7 +293,7 @@ function windowSvg(els: Els, v: View, o: { width?: number; height: number; compa
     width: o.width,
     height: o.height,
   })
-  const alt = `${v.pct ?? 0}% of the context window used${v.b?.threshold !== undefined ? `; auto-compact at ${fmt(v.b.threshold)}` : ''}`
+  const alt = `${v.isEstimate ? 'About ' : ''}${v.pct ?? 0}% of the context window used${v.b?.threshold !== undefined ? `; auto-compact at ${fmt(v.b.threshold)}` : ''}`
   return o.width !== undefined ? <Svg source={source} alt={alt} width={o.width} height={o.height} /> : <Svg source={source} alt={alt} height={o.height} />
 }
 
@@ -289,7 +344,7 @@ export const register: Register = on => {
       name: 'context-control',
       description: 'Open the Context Control pane: breakdown, history, compactions and settings',
     })
-    void refresh($)
+    void startWatching($)
     if (s.openPaneOnStart) void openPane($)
     return next(e)
   })
@@ -368,8 +423,8 @@ export const register: Register = on => {
     } else {
       summary = (
         <Button key="toggle" plain onPress={toggle}>
-          <Text bold color={tone}>{`${v.pct}%`}</Text>
-          <Text dimColor>{`  ${fmt(v.tokens)} / ${win}`}</Text>
+          <Text bold color={tone}>{`${approx(v.isEstimate)}${v.pct}%`}</Text>
+          <Text dimColor>{`  ${approx(v.isEstimate)}${fmt(v.tokens)} / ${win}`}</Text>
           <Text dimColor>{v.last !== undefined ? `  ·  ${fmtDelta(v.last)} last turn` : ''}</Text>
         </Button>
       )
@@ -411,8 +466,8 @@ export const register: Register = on => {
         <Box flexDirection="column" rowGap={1} paddingBottom={1}>
           <Box flexDirection="row" justifyContent="space-between">
             <Text>
-              <Text bold color={tone}>{`${v.pct}%`}</Text>
-              <Text dimColor>{` of ${win}  ·  ${fmt(v.tokens)} tokens`}</Text>
+              <Text bold color={tone}>{`${approx(v.isEstimate)}${v.pct}%`}</Text>
+              <Text dimColor>{` of ${win}  ·  ${approx(v.isEstimate)}${fmt(v.tokens)} tokens`}</Text>
             </Text>
             <Text dimColor>{v.b?.threshold !== undefined ? `auto-compact at ${fmt(v.b.threshold)}` : v.b && !v.b.isAutoCompactEnabled ? 'auto-compact off' : ''}</Text>
           </Box>
@@ -432,7 +487,7 @@ export const register: Register = on => {
               Last turn <Text bold>{fmtDelta(v.last)}</Text>
             </Text>
             <Text dimColor>
-              Avg / turn <Text bold>{v.avg !== undefined ? fmt(v.avg) : '—'}</Text>
+              Avg / turn <Text bold>{v.avg !== undefined ? `${approx(v.isAvgEstimate)}${fmt(v.avg)}` : '—'}</Text>
             </Text>
             <Text dimColor>
               Auto-compact in <Text bold color={tone}>{v.turns !== undefined ? `~${v.turns} ${v.turns === 1 ? 'turn' : 'turns'}` : '—'}</Text>
@@ -448,7 +503,7 @@ export const register: Register = on => {
         <Box flexDirection="column" rowGap={1} paddingBottom={1}>
           <Text>
             <Text bold>Compact conversation</Text>
-            <Text dimColor>{v.tokens !== undefined ? `  ·  ${fmt(v.tokens)} now; older messages become a summary, recent ones stay` : ''}</Text>
+            <Text dimColor>{v.tokens !== undefined ? `  ·  ${approx(v.isEstimate)}${fmt(v.tokens)} now; older messages become a summary, recent ones stay` : ''}</Text>
           </Text>
           {'Input' in els ? (
             <els.Input
@@ -601,8 +656,8 @@ export const register: Register = on => {
         {tabs}
         <Text dimColor>{`Context window · ${await $.session.model()}`}</Text>
         <Text>
-          <Text bold color={tone}>{`${v.pct}%`}</Text>
-          <Text dimColor>{`  ${fmt(v.tokens)} of ${fmtWindow(v.r.window)} tokens`}</Text>
+          <Text bold color={tone}>{`${approx(v.isEstimate)}${v.pct}%`}</Text>
+          <Text dimColor>{`  ${approx(v.isEstimate)}${fmt(v.tokens)} of ${fmtWindow(v.r.window)} tokens`}</Text>
         </Text>
         {windowSvg(els, v, { height: 12, compacting: false })}
         <Text dimColor>{v.b?.threshold !== undefined ? `auto-compact at ${fmt(v.b.threshold)}` : 'auto-compact off'}</Text>
@@ -611,7 +666,7 @@ export const register: Register = on => {
             Last turn <Text bold>{fmtDelta(v.last)}</Text>
           </Text>
           <Text dimColor>
-            Avg <Text bold>{v.avg !== undefined ? fmt(v.avg) : '—'}</Text>
+            Avg <Text bold>{v.avg !== undefined ? `${approx(v.isAvgEstimate)}${fmt(v.avg)}` : '—'}</Text>
           </Text>
           <Text dimColor>
             Auto-compact in <Text bold color={tone}>{v.turns !== undefined ? `~${v.turns} ${v.turns === 1 ? 'turn' : 'turns'}` : '—'}</Text>

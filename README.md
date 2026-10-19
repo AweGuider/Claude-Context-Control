@@ -93,9 +93,9 @@ When on, each compaction first writes `.claude/context-snapshots/<date>_<time>.m
 
 ## What it reads, sends and writes
 
-- **Reads** the session's own usage figures (context fill, window size and the breakdown by category) and, only for a snapshot, the session's transcript.
+- **Reads** the session's own usage figures (context fill, window size and the breakdown by category), the session's id and prompt count, and, only for a snapshot, the session's transcript.
 - **Sends** nothing by default: no network requests, no model calls, no telemetry. With **Exact counts** on (off by default), the breakdown uses Claude Code's own token-count requests, one per tool and memory file, as `/context` does, to the Anthropic API your session already uses.
-- **Writes** its settings through Claude Code's plugin storage and, only with snapshots on, two kinds of file in `.claude/context-snapshots/` under the working directory: the snapshot Markdown files and, with **Keep snapshots out of git** on, a `.gitignore` that tells git to ignore that folder. It writes no other file.
+- **Writes** its settings and each session's context size per turn (token counts only, the 20 most recent sessions) through Claude Code's plugin storage and, only with snapshots on, two kinds of file in `.claude/context-snapshots/` under the working directory: the snapshot Markdown files and, with **Keep snapshots out of git** on, a `.gitignore` that tells git to ignore that folder. It writes no other file.
 - **Hooks compaction** (`session.compact`) only to save the snapshot first and to record the compaction in its history. It passes every compaction on unchanged and never delays, edits or blocks it.
 - **Adds one command**, `/context-control`, which opens the mod's pane and does nothing else.
 
@@ -133,7 +133,7 @@ No. It makes no network requests and no model calls. The optional **Exact counts
 
 ### Does it write anything to my disk?
 
-Only its settings, and snapshots if you turn them on. Snapshots go to `.claude/context-snapshots/` in your project, with a `.gitignore` there that keeps them out of git.
+Only its settings and recent sessions' context sizes (both in Claude Code's plugin storage), and snapshots if you turn them on. Snapshots go to `.claude/context-snapshots/` in your project, with a `.gitignore` there that keeps them out of git.
 
 ### How do I update or uninstall it?
 
@@ -146,7 +146,8 @@ No. Context Control is an unofficial community mod by AweDev, not affiliated wit
 ## Limitations
 
 - Where an organization manages Claude Code, hooks on compaction run only for plugins the organization lists, so snapshots and the compaction history record only the mod's own Compact button there.
-- Figures appear after the first reply of a session and again after the first reply following a compaction.
+- Claude Code reports no token count until a session's first reply, so until then the band shows the breakdown's own estimate, marked `~`. The same applies to the average per turn of a session with no history yet: it is estimated from message tokens over prompts sent, and reads low after an earlier compaction.
+- **Last turn** shows `—` after the mod missed turns (installed or updated mid-session), until the next reply.
 
 ## Development
 

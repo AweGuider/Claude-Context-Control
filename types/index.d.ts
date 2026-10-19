@@ -1,6 +1,7 @@
 export type Reading = { tokens?: number; window: number; percent?: number }
 
-export type Point = { tokens: number; isCompaction?: true }
+/** `isGap`: the turns before it went unwatched, so no growth is read across it. */
+export type Point = { tokens: number; isCompaction?: true; isGap?: true }
 
 export type Category = { name: string; tokens: number; color: string }
 
@@ -12,6 +13,9 @@ export type Breakdown = {
   isAutoCompactEnabled: boolean
   fixed: FixedCost[]
   isExact: boolean
+  /** The breakdown's own total: shown, marked "~", while Claude Code reports no token count. */
+  estimate: number
+  messages?: number
 }
 
 export type Compaction = {
@@ -54,6 +58,7 @@ declare module 'claude-code' {
       tab: Tab
       settings: ControlSettings
       shownFill: number
+      turnCount: number | null
       isAlerted: boolean
       error: string
     }

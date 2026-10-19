@@ -39,17 +39,34 @@ const BAND = {
   view: {},
 }
 
-const ctx = (tokens: number) => ({ tokens, window: WINDOW, percent: Math.round((tokens / WINDOW) * 100) })
+const ctx = (tokens: number | undefined) => ({ tokens, window: WINDOW, percent: tokens === undefined ? undefined : Math.round((tokens / WINDOW) * 100) })
 
 const SUMMARY: SessionMessage[] = [{ role: 'user', text: 'Summary of the conversation so far', toolUses: [] }]
 
-function engine(on: On, state: { tokens: number }) {
+function engine(on: On, state: { tokens: number | undefined }, o: { saved?: Record<string, unknown>; breakdownAfter?: Promise<void> } = {}) {
   const toasts: string[] = []
-  mock.store(on)
-  mock.clock(on, { now: Date.UTC(2026, 9, 15, 12) })
+  // A store of the test's own, so a test can read what the mod saved.
+  const store = new Map<string, unknown>(Object.entries(o.saved ?? {}))
+  on('store.get', ($, e) => ({ value: store.get(e.key) }))
+  on('store.set', ($, e) => {
+    store.set(e.key, JSON.parse(JSON.stringify(e.value)))
+    return { value: undefined } as never
+  })
+  on('store.delete', ($, e) => {
+    store.delete(e.key)
+    return { value: undefined } as never
+  })
+  on('store.keys', () => ({ value: [...store.keys()] }))
+  const clock = mock.clock(on, { now: Date.UTC(2026, 9, 15, 12) })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.measure', ($, e) => ({ changed: e.changed }))
-  on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { ...ctx(state.tokens), breakdown: BREAKDOWN } } }))
+  on('session.id', () => ({ value: 'abc' }))
+  on('session.turns', () => ({ value: 4 }))
+  on('session.usage', async ($, e) => {
+    if (!e.breakdown) return { value: { startedAt: 0, rateLimits: [], context: ctx(state.tokens) } }
+    await o.breakdownAfter
+    return { value: { startedAt: 0, rateLimits: [], context: { ...ctx(state.tokens), breakdown: BREAKDOWN } } }
+  })
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('ui.open', () => ({ value: { isPlaced: true as const } }))
   on('session.messages', () => ({ value: SUMMARY }) as never)
@@ -57,11 +74,17 @@ function engine(on: On, state: { tokens: number }) {
     toasts.push(e.text)
     return { value: undefined } as never
   })
-  return { toasts }
+  return { toasts, store, clock }
 }
 
 async function start($: Engine) {
   await $.session.start({ source: 'startup', cwd: 'C:/work', surface: 'desktop', isInteractive: true } as never)
+}
+
+/** Starts the session and lets the start hook's unawaited reads finish. */
+async function startSettled($: Engine, clock: { settle: () => Promise<void> }) {
+  await start($)
+  await clock.settle()
 }
 
 async function measure($: Engine, tokens: number) {
@@ -86,6 +109,72 @@ test('the band shows fill, growth and turns until auto-compact on both surfaces'
     await ui.press({ key: 'toggle' })
     await ui.unmount()
   }
+})
+
+test('the band draws from the plain usage before the breakdown arrives', async ($, on) => {
+  let release = () => {}
+  const breakdownAfter = new Promise<void>(resolve => (release = resolve))
+  const { clock } = engine(on, { tokens: 100_000 }, { breakdownAfter })
+  await startSettled($, clock)
+
+  const ui = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  expect((await ui.find({ key: 'toggle' }))?.text).toMatch(/10%.*100\.0k \/ 1M/)
+  expect(await ui.find({ text: /What fills it|auto-compact/ }), 'no breakdown yet').toBeUndefined()
+  release()
+  await ui.unmount()
+})
+
+test('before the first reply the band shows the breakdown estimate, marked ~', async ($, on) => {
+  const { clock } = engine(on, { tokens: undefined })
+  await startSettled($, clock)
+
+  const ui = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  expect((await ui.find({ key: 'toggle' }))?.text).toMatch(/~10%.*~100\.0k \/ 1M/)
+  // Avg ~ 72.5k messages over 4 prompts = 18.1k; (967k - 100k) / 18.1k = 48 turns.
+  expect(await ui.find({ text: /auto-compact in ~48 turns/ })).toBeDefined()
+  await ui.press({ key: 'toggle' })
+  expect(await ui.find({ text: /~18\.1k/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a resumed session keeps its history: Last turn and Avg show at once', async ($, on) => {
+  const saved = { 'history:abc': { at: 0, points: [{ tokens: 100_000 }, { tokens: 110_000 }] } }
+  const { clock } = engine(on, { tokens: 110_000 }, { saved })
+  await startSettled($, clock)
+
+  const ui = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  expect((await ui.find({ key: 'toggle' }))?.text).toMatch(/\+10\.0k last turn/)
+  expect(await ui.find({ text: /auto-compact in ~86 turns/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('turns the mod did not watch are a gap: no Last turn, Avg kept', async ($, on) => {
+  const saved = { 'history:abc': { at: 0, points: [{ tokens: 100_000 }, { tokens: 110_000 }] } }
+  const { clock } = engine(on, { tokens: 150_000 }, { saved })
+  await startSettled($, clock)
+
+  const ui = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  expect((await ui.find({ key: 'toggle' }))?.text).not.toMatch(/last turn/)
+  expect(await ui.find({ text: /auto-compact in ~82 turns/ })).toBeDefined()
+  await ui.unmount()
+
+  await measure($, 160_000)
+  const after = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  expect((await after.find({ key: 'toggle' }))?.text).toMatch(/\+10\.0k last turn/)
+  await after.unmount()
+})
+
+test('histories are saved per session and only the newest 20 are kept', async ($, on) => {
+  const saved = Object.fromEntries(Array.from({ length: 25 }, (_, i) => [`history:old${i}`, { at: i, points: [{ tokens: 1 }] }]))
+  const { clock, store } = engine(on, { tokens: 100_000 }, { saved })
+  await startSettled($, clock)
+  await measure($, 120_000)
+
+  const keys = [...store.keys()].filter(k => k.startsWith('history:'))
+  expect(keys).toHaveLength(20)
+  expect(keys).toContain('history:abc')
+  expect(keys).not.toContain('history:old0')
+  expect((store.get('history:abc') as { points: unknown[] }).points).toEqual([{ tokens: 100_000 }, { tokens: 120_000 }])
 })
 
 test('compact waits while Claude is working, and opens the focus field when idle', async ($, on) => {
@@ -129,7 +218,6 @@ test('a snapshot is written before compaction when turned on', async ($, on) => 
   engine(on, state)
   const written = new Map<string, string>()
   on('session.cwd', () => ({ value: 'C:\\work' }))
-  on('session.id', () => ({ value: 'abc' }))
   on('session.model', () => ({ value: 'Opus 5.5' }))
   on('fs.exists', ($, e) => ({ value: written.has(e.path) }))
   on('fs.write', ($, e) => {

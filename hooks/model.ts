@@ -72,6 +72,8 @@ export function toBreakdown(b: SessionContextBreakdown, isExact: boolean): Break
     isAutoCompactEnabled: b.isAutoCompactEnabled,
     fixed: fixed.slice(0, 8),
     isExact,
+    estimate: b.totalTokens,
+    messages: used.find(c => c.name === 'Messages')?.tokens,
   }
 }
 
@@ -106,11 +108,20 @@ export function growth(history: readonly Point[], over: number): { last?: number
   const start = history.findLastIndex(p => p.isCompaction === true)
   const run = history.slice(Math.max(0, start))
   const deltas: number[] = []
-  for (let i = 1; i < run.length; i++) deltas.push(run[i]!.tokens - run[i - 1]!.tokens)
+  for (let i = 1; i < run.length; i++) if (!run[i]!.isGap) deltas.push(run[i]!.tokens - run[i - 1]!.tokens)
   if (deltas.length === 0) return {}
   const recent = deltas.slice(-Math.max(1, over)).filter(d => d > 0)
   const avg = recent.length > 0 ? recent.reduce((a, b) => a + b, 0) / recent.length : undefined
-  return { last: deltas.at(-1), avg }
+  return { last: run.at(-1)?.isGap ? undefined : deltas.at(-1), avg }
+}
+
+/**
+ * Growth per turn guessed from the conversation so far: message tokens over prompts sent.
+ * Counts every prompt since the session began, so after a compaction it reads low.
+ */
+export function estimatedAvg(b: Breakdown | null, turns: number | null): number | undefined {
+  if (b?.messages === undefined || !turns || turns <= 0) return undefined
+  return b.messages / turns
 }
 
 export function turnsLeft(tokens: number, limit: number, avg: number | undefined): number | undefined {

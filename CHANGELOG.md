@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased (0.2.0)
+
+- The band appears as soon as a session opens: it draws from Claude Code's free usage figures first and fetches the breakdown after.
+- Before a session's first reply, the band shows the breakdown's own estimate, marked `~`, instead of "measuring".
+- Last turn, Avg / turn and Auto-compact in survive a resume or an app restart: each session's context size per turn is kept in the mod's plugin storage (the 20 most recent sessions).
+- A session with no history yet shows an estimated Avg / turn (marked `~`) from message tokens over prompts sent, so turns until auto-compact show at once.
+
 ## 0.1.3 (2026-10-15)
 
 - Snapshots now always go to `.claude/context-snapshots/` in the session's working directory. The **Snapshot folder** setting is removed, so the plugin directory can read exactly which files the mod writes.
