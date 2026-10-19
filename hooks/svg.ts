@@ -31,7 +31,7 @@ export function windowBar(o: {
   const from = x(o.from)
   const parts: string[] = [
     `<defs><pattern id="h" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="5" fill="rgba(128,128,128,0.5)"/></pattern>`,
-    `<clipPath id="c"><rect x="0" y="${y}" width="${to}" height="${bh}" rx="${bh / 2}"><animate attributeName="width" from="${from}" to="${to}" dur="0.7s" fill="freeze" ${EASE}/></rect></clipPath>`,
+    `<clipPath id="c"><rect x="0" y="${y}" width="${to}" height="${bh}" rx="${bh / 2}">${from === to ? '' : `<animate attributeName="width" from="${from}" to="${to}" dur="0.7s" fill="freeze" ${EASE}/>`}</rect></clipPath>`,
     `<linearGradient id="s" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="0.5" stop-color="#fff" stop-opacity="0.45"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>`,
     `<rect x="0" y="${y}" width="${W}" height="${bh}" rx="${bh / 2}" fill="${TRACK}"/>`,
   ]
@@ -52,8 +52,8 @@ export function windowBar(o: {
   return svg(W, H, parts.join(''))
 }
 
-/** What fills the used part, as one stacked bar; segments fade in left to right. */
-export function compositionBar(cats: readonly Category[], width = 1600, height = 8): string {
+/** What fills the used part, as one stacked bar; with `fade`, segments fade in left to right. */
+export function compositionBar(cats: readonly Category[], fade: boolean, width = 1600, height = 8): string {
   const total = cats.reduce((a, c) => a + c.tokens, 0)
   if (total <= 0) return svg(width, height, '')
   const gap = 6
@@ -63,7 +63,8 @@ export function compositionBar(cats: readonly Category[], width = 1600, height =
   const parts = cats.map((c, i) => {
     const w = Math.max(minW, (c.tokens / total) * room)
     const at = Math.min(0.9, i * 0.08).toFixed(2)
-    const rect = `<rect x="${x.toFixed(1)}" y="0" width="${w.toFixed(1)}" height="${height}" rx="2" fill="${c.color}"><animate attributeName="opacity" values="0;0;1" keyTimes="0;${at};1" dur="${(0.5 + Number(at)).toFixed(2)}s" fill="freeze"/></rect>`
+    const anim = fade ? `<animate attributeName="opacity" values="0;0;1" keyTimes="0;${at};1" dur="${(0.5 + Number(at)).toFixed(2)}s" fill="freeze"/>` : ''
+    const rect = `<rect x="${x.toFixed(1)}" y="0" width="${w.toFixed(1)}" height="${height}" rx="2" fill="${c.color}">${anim}</rect>`
     x += w + gap
     return rect
   })
@@ -106,3 +107,4 @@ export function rankBar(share: number, color: string, width = 600, height = 4): 
     `<rect x="0" y="0" width="${width}" height="${height}" rx="2" fill="${TRACK}"/><rect x="0" y="0" width="${w.toFixed(1)}" height="${height}" rx="2" fill="${color}"><animate attributeName="width" from="0" to="${w.toFixed(1)}" dur="0.6s" fill="freeze" ${EASE}/></rect>`,
   )
 }
+

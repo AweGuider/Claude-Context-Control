@@ -42,6 +42,7 @@ export type ControlSettings = {
   exactCounts: boolean
   snapshot: boolean
   snapshotGitignore: boolean
+  arrowTooltip: boolean
 }
 
 declare module 'claude-code' {
@@ -58,6 +59,10 @@ declare module 'claude-code' {
       tab: Tab
       settings: ControlSettings
       shownFill: number
+      changedAt: number
+      breakdownAt: number
+      toggledAt: number
+      revealFrame: number
       turnCount: number | null
       isAlerted: boolean
       error: string

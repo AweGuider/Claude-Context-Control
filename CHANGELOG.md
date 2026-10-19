@@ -6,6 +6,12 @@
 - Before a session's first reply, the band shows the breakdown's own estimate, marked `~`, instead of "measuring".
 - Last turn, Avg / turn and Auto-compact in survive a resume or an app restart: each session's context size per turn is kept in the mod's plugin storage (the 20 most recent sessions).
 - A session with no history yet shows an estimated Avg / turn (marked `~`) from message tokens over prompts sent, so turns until auto-compact show at once.
+- Strip: the percentage sits bold beside the bar; tokens, the last turn's growth (in its own colour) and "last turn" are spaced apart. The right side reads auto-compact, **Compact**, then a ↗ icon that opens the pane and a ▲/▼ arrow, replacing More / Less. Both name themselves on hover in a small dim line; a setting turns that off.
+- Click anywhere on the band to open the breakdown, and anywhere on it to close it. It opens in four short stages from the strip and closes the same way.
+- The open breakdown never scrolls: on a short band it gives up spacing, then its lowest legend rows ("+N more"). The legend takes three columns on a wide band.
+- The pane opens with the keyboard focus, so its first click lands on Overview or Settings. In its Settings, number fields no longer repeat their label, and wrap in a narrow pane.
+- On a narrow band the strip shortens ("~6 turns left", no "last turn", no "/ 1M"), then drops the growth and turns, so **Compact** and the arrow always fit.
+- Opening and closing the breakdown no longer replays the bar's grow or the composition's fade; they animate only when the figures change.
 
 ## 0.1.3 (2026-10-15)
 

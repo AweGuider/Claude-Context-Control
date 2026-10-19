@@ -24,10 +24,10 @@ Context Control is a Claude Code mod that keeps your **context window** in view.
 
 ## What it does
 
-- **Band above the prompt.** Fill bar, percentage, tokens / window, growth last turn and turns left until auto-compact. Click it (or **More**) for the breakdown: the window with the auto-compact marker, what fills it by category, last turn, average per turn.
+- **Band above the prompt.** Fill bar, percentage, tokens / window, growth last turn and turns left until auto-compact. Click anywhere on it (or the ▲ arrow) for the breakdown, which opens in short stages from the strip: the window with the auto-compact marker, what fills it by category, last turn, average per turn. Click anywhere on the breakdown, or ▼, to close it. It never scrolls: when the band is short, it drops spacing and its lowest legend rows first.
 - **Compact with focus.** **Compact** opens a field for what the summary must keep, then runs the same compaction `/compact` does. While Claude is working it waits for the turn to end.
 - **Alerts.** The band turns amber, then red, as you approach auto-compact (70% and 85% of the threshold by default), and one toast fires when you cross the alert line.
-- **Side pane** (`/context-control`, or **Open pane ↗** in the expanded band): context over the session with compaction markers, what fills it, what is loaded on every turn (MCP servers, memory files, skill listing, agents) and compaction history.
+- **Side pane** (the ↗ icon on the band, or `/context-control`): context over the session with compaction markers, what fills it, what is loaded on every turn (MCP servers, memory files, skill listing, agents) and compaction history.
 - **Pre-compact snapshot** (off by default): before any compaction, manual or auto, writes a Markdown handoff of recent prompts, files touched and open tasks.
 
 The bars animate as the numbers change: fill grows, the session chart draws in, the band breathes at the alert level and shimmers while compacting.
@@ -80,9 +80,10 @@ In the pane's **Settings** tab; saved across sessions.
 | Band above the prompt | On |
 | Band starts | Collapsed |
 | Open the pane when a session starts | Off |
+| Name the band's ↗ and ▲ icons on hover | On |
 | Warn at / Alert at | 70% / 85% of auto-compact |
 | Toast once when crossing Alert | On |
-| Turns-left estimate averages the last | 5 turns |
+| Average over (for turns left) | 5 turns |
 | Exact counts | Off |
 | Pre-compact snapshot | Off |
 | Keep snapshots out of git | On |

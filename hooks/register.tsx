@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { Elements, EngineInterface, Register, SessionCompactResult, SessionContextUsage, SessionMessage } from 'claude-code'
+import type { Elements, EngineInterface, Register, SessionCompactResult, SessionContextUsage, SessionMessage, Timer } from 'claude-code'
 
 import { DEFAULTS, TEXT_TONE, TONE, clampPercent, estimatedAvg, fmt, fmtDelta, fmtWindow, growth, levelOf, limitOf, toBreakdown, turnsLeft } from './model'
 import type { Level } from './model'
@@ -20,6 +20,10 @@ const draft = atom({ plugin: 'context-control', key: 'draft' } as const, '')
 const tab = atom({ plugin: 'context-control', key: 'tab' } as const, 'overview')
 const settings = atom({ plugin: 'context-control', key: 'settings' } as const, DEFAULTS)
 const shownFill = atom({ plugin: 'context-control', key: 'shownFill' } as const, 0)
+const changedAt = atom({ plugin: 'context-control', key: 'changedAt' } as const, 0)
+const breakdownAt = atom({ plugin: 'context-control', key: 'breakdownAt' } as const, 0)
+const toggledAt = atom({ plugin: 'context-control', key: 'toggledAt' } as const, 0)
+const revealFrame = atom({ plugin: 'context-control', key: 'revealFrame' } as const, 0)
 const turnCount = atom({ plugin: 'context-control', key: 'turnCount' } as const, null)
 const isAlerted = atom({ plugin: 'context-control', key: 'isAlerted' } as const, false)
 const error = atom({ plugin: 'context-control', key: 'error' } as const, '')
@@ -32,6 +36,15 @@ const message = (err: unknown) => (err instanceof Error ? err.message : String(e
 
 const HISTORY_KEY = 'history:'
 const KEEP_HISTORIES = 20
+/** Longer than the bar's grow and the composition's fade, so only a draw this soon after a change animates. */
+const ANIMATE_MS = 1500
+const DELTA_COLOR = '#7fa7e0'
+/** The breakdown opens in up to four stages: one every STAGE_MS, closing a little faster. */
+const STAGE_MS = 55
+const CLOSE_STAGE_MS = 40
+const STAGES = 4
+/** Columns at the strip's right end the click area leaves bare, so Compact and the icons take their own clicks. */
+const CLICK_CLEAR_RIGHT = 20
 
 /** Everything a drawing needs, derived once per draw. */
 type View = {
@@ -49,16 +62,28 @@ type View = {
   turns?: number
   b: Breakdown | null
   s: ControlSettings
+  /** Where the bar's fill grows from: the last reading's, or `to` once that change has been drawn. */
   from: number
+  fadeComposition: boolean
 }
 
 async function viewOf($: Engine): Promise<View | null> {
   const r = await read($, reading)
   if (r === null) return null
-  const [b, s, points, from, prompts] = await Promise.all([read($, breakdown), read($, settings), read($, history), read($, shownFill), read($, turnCount)])
+  const [b, s, points, shown, prompts, readingAt, compositionAt, now] = await Promise.all([
+    read($, breakdown),
+    read($, settings),
+    read($, history),
+    read($, shownFill),
+    read($, turnCount),
+    read($, changedAt),
+    read($, breakdownAt),
+    $.clock.now(),
+  ])
   const limit = limitOf(r, b)
   const isEstimate = r.tokens === undefined && b !== null
   const tokens = r.tokens ?? b?.estimate
+  const fill = tokens === undefined ? 0 : (tokens / r.window) * 100
   const pct = tokens === undefined ? undefined : isEstimate ? Math.round((tokens / r.window) * 100) : (r.percent ?? Math.round((tokens / r.window) * 100))
   const measured = growth(points, s.averageOver)
   const avg = measured.avg ?? estimatedAvg(b, prompts)
@@ -76,7 +101,8 @@ async function viewOf($: Engine): Promise<View | null> {
     turns: tokens === undefined ? undefined : turnsLeft(tokens, limit, avg),
     b,
     s,
-    from,
+    from: now - readingAt < ANIMATE_MS ? shown : fill,
+    fadeComposition: now - compositionAt < ANIMATE_MS,
   }
 }
 
@@ -106,6 +132,10 @@ async function ingest($: Engine, ctx: SessionContextUsage, isSeed = false) {
   const shown = before?.tokens ?? b?.estimate
   await update($, shownFill, () => (shown !== undefined && before ? (shown / before.window) * 100 : 0))
   await update($, reading, () => next)
+  if (next.tokens !== before?.tokens) {
+    const now = await $.clock.now()
+    await update($, changedAt, () => now)
+  }
   if (next.tokens === undefined) return
   const tokens = next.tokens
 
@@ -137,6 +167,21 @@ async function checkAlert($: Engine) {
   }
 }
 
+/** Stores the breakdown, and when what it shows changed, the time, so that change animates once. */
+async function storeBreakdown($: Engine, next: Breakdown) {
+  const [prev, r] = await Promise.all([read($, breakdown), read($, reading)])
+  await update($, breakdown, () => next)
+  const isNew = JSON.stringify(prev?.used) !== JSON.stringify(next.used)
+  const isNewEstimate = r?.tokens === undefined && prev?.estimate !== next.estimate
+  if (!isNew && !isNewEstimate) return
+  const now = await $.clock.now()
+  if (isNew) await update($, breakdownAt, () => now)
+  if (isNewEstimate && r) {
+    await update($, shownFill, () => (prev ? (prev.estimate / r.window) * 100 : 0))
+    await update($, changedAt, () => now)
+  }
+}
+
 /**
  * The plain usage call is free and quick, so the band draws from it first;
  * the breakdown (the slow part) and the prompt count follow.
@@ -146,7 +191,7 @@ async function refresh($: Engine, ctx?: SessionContextUsage, isSeed = false) {
     await ingest($, ctx ?? (await $.session.usage()).context, isSeed)
     const s = await read($, settings)
     const found = (await $.session.usage({ breakdown: s.exactCounts ? 'full' : 'summary' })).context.breakdown
-    if (found) await update($, breakdown, () => toBreakdown(found, s.exactCounts))
+    if (found) await storeBreakdown($, toBreakdown(found, s.exactCounts))
     await checkAlert($)
     const prompts = await $.session.turns()
     await update($, turnCount, () => prompts)
@@ -260,8 +305,9 @@ async function compactNow($: Engine, focus: string) {
   }
 }
 
-function openPane($: Engine) {
-  return $.ui.open({ id: PANE, title: 'Context' })
+/** `focus` when the person asked for it, so the pane's first click presses a tab instead of only focusing the pane. */
+function openPane($: Engine, focus = false) {
+  return $.ui.open(focus ? { id: PANE, title: 'Context', focus: true } : { id: PANE, title: 'Context' })
 }
 
 const textBar = (pct: number, cells: number) => {
@@ -297,7 +343,7 @@ function windowSvg(els: Els, v: View, o: { width?: number; height: number; compa
   return o.width !== undefined ? <Svg source={source} alt={alt} width={o.width} height={o.height} /> : <Svg source={source} alt={alt} height={o.height} />
 }
 
-function compositionSvg(els: Els, b: Breakdown) {
+function compositionSvg(els: Els, b: Breakdown, fade: boolean) {
   const total = b.used.reduce((a, c) => a + c.tokens, 0)
   if (!('Svg' in els)) {
     const { Box, Text } = els
@@ -310,7 +356,7 @@ function compositionSvg(els: Els, b: Breakdown) {
     )
   }
   const { Svg } = els
-  return <Svg source={compositionBar(b.used)} alt={`Used context by category: ${b.used.map(c => `${c.name} ${fmt(c.tokens)}`).join(', ')}`} height={8} />
+  return <Svg source={compositionBar(b.used, fade)} alt={`Used context by category: ${b.used.map(c => `${c.name} ${fmt(c.tokens)}`).join(', ')}`} height={8} />
 }
 
 function legend(els: Els, b: Breakdown, columns: 1 | 2) {
@@ -330,6 +376,86 @@ function legend(els: Els, b: Breakdown, columns: 1 | 2) {
           </Box>
         </Box>
       ))}
+    </Box>
+  )
+}
+
+/** The legend as rows of one or two categories, so the breakdown can reveal it row by row. */
+function legendRows(els: Els, b: Breakdown, columns: 1 | 2 | 3) {
+  const { Box, Text } = els
+  const total = b.used.reduce((a, c) => a + c.tokens, 0)
+  const rows = []
+  for (let i = 0; i < b.used.length; i += columns) {
+    rows.push(
+      <Box flexDirection="row">
+        {b.used.slice(i, i + columns).map(c => (
+          <Box flexDirection="row" width={columns === 3 ? '33%' : columns === 2 ? '50%' : '100%'} paddingRight={columns > 1 ? 3 : 0}>
+            <Text color={c.color}>■ </Text>
+            <Box flexGrow={1}>
+              <Text wrap="truncate-end">{c.name}</Text>
+            </Box>
+            <Text>{fmt(c.tokens)}</Text>
+            <Box width={6} justifyContent="flex-end">
+              <Text dimColor>{share(c.tokens, total)}</Text>
+            </Box>
+          </Box>
+        ))}
+      </Box>,
+    )
+  }
+  return rows
+}
+
+let revealTimer: Timer | undefined
+
+/** Opens or closes the breakdown; with `animate`, redraws once per stage until every stage has shown. */
+async function toggleDetails($: Engine, animate: boolean) {
+  const isOpen = await update($, expanded, x => !x)
+  if (!animate) return
+  const start = await $.clock.now()
+  const step = isOpen ? STAGE_MS : CLOSE_STAGE_MS
+  await update($, toggledAt, () => start)
+  revealTimer?.cancel()
+  revealTimer = undefined
+  const timer = $.clock.every(step, () => {
+    void (async () => {
+      await update($, revealFrame, n => n + 1)
+      if ((await $.clock.now()) - start >= step * STAGES) {
+        timer.cancel()
+        if (revealTimer === timer) revealTimer = undefined
+      }
+    })()
+  })
+  revealTimer = timer
+}
+
+function composeOf($: Engine, els: Els, v: View, s: ControlSettings, text: string, show: boolean) {
+  if (!show) return null
+  const { Box, Text, Button } = els
+  return (
+    <Box flexDirection="column" rowGap={1} paddingBottom={1}>
+      <Text>
+        <Text bold>Compact conversation</Text>
+        <Text dimColor>{v.tokens !== undefined ? `  ·  ${approx(v.isEstimate)}${fmt(v.tokens)} now; older messages become a summary, recent ones stay` : ''}</Text>
+      </Text>
+      {'Input' in els ? (
+        <els.Input
+          key="focus"
+          label="Focus (optional)"
+          placeholder="What the summary must keep"
+          value={text}
+          autoFocus
+          submitLabel="Compact"
+          onInput={value => void update($, draft, () => value)}
+          onSubmit={value => void compactNow($, value)}
+        />
+      ) : null}
+      <Box flexDirection="row" columnGap={2} alignItems="center">
+        <Text dimColor>{s.snapshot ? 'Snapshot first → .claude/context-snapshots/' : 'No snapshot · turn it on in the pane’s Settings'}</Text>
+        <Box flexGrow={1} />
+        <Button key="cancel" label="Cancel" onPress={() => update($, composing, () => false)} />
+        <Button key="go" label="Compact" variant="primary" onPress={async () => compactNow($, await read($, draft))} />
+      </Box>
     </Box>
   )
 }
@@ -371,8 +497,14 @@ export const register: Register = on => {
     return aroundCompact($, { trigger: e.trigger, focus: e.instructions, messages: e.messages }, () => next(e))
   }).catch(($, e, next) => next(e))
 
+  on('ui.message', async ($, e, next) => {
+    if (!e.element.startsWith('click-')) return next(e)
+    if ((e.data as { type?: unknown } | null)?.type === 'toggle') await toggleDetails($, true)
+    return {}
+  })
+
   on('command.run', { command: 'context-control' }, async $ => {
-    await openPane($)
+    await openPane($, true)
     return { text: 'Opened the Context Control pane.' }
   })
 
@@ -381,18 +513,22 @@ export const register: Register = on => {
     if (!s.showBand || e.props.hasSurvey) return next(e)
     const v = await viewOf($)
     if (v === null) return next(e)
-    const [ph, isOpen, isComposing, text, compacts] = await Promise.all([
+    const [ph, isOpen, isComposing, text, compacts, toggled, now] = await Promise.all([
       read($, phase),
       read($, expanded),
       read($, composing),
       read($, draft),
       read($, compactions),
+      read($, toggledAt),
+      $.clock.now(),
+      // Read only so each frame of a reveal draws again.
+      read($, revealFrame),
     ])
     const els = $.ui.resolve(e)
     const { Box, Text, Button } = els
     const tone = TEXT_TONE[v.level]
     const win = fmtWindow(v.r.window)
-    const toggle = () => update($, expanded, x => !x)
+    const toggle = () => toggleDetails($, 'Client' in els)
     const lastCompaction = compacts.at(-1)
 
     let summary
@@ -420,26 +556,30 @@ export const register: Register = on => {
           <Text dimColor>  measuring — figures appear after the next reply</Text>
         </Text>
       )
-    } else {
-      summary = (
-        <Button key="toggle" plain onPress={toggle}>
-          <Text bold color={tone}>{`${approx(v.isEstimate)}${v.pct}%`}</Text>
-          <Text dimColor>{`  ${approx(v.isEstimate)}${fmt(v.tokens)} / ${win}`}</Text>
-          <Text dimColor>{v.last !== undefined ? `  ·  ${fmtDelta(v.last)} last turn` : ''}</Text>
-        </Button>
-      )
     }
 
+    // Narrower bands drop words first, then whole figures, so Compact and the arrow always fit.
+    const isNarrow = e.props.bodyColumns < 90
+    const isTiny = e.props.bodyColumns < 60
+    const canToggle = v.tokens !== undefined && ph === 'idle'
+    const toggleLabel = isOpen ? 'Hide details' : 'Show details'
+    const a = approx(v.isEstimate)
+    const turnsWord = v.turns === 1 ? 'turn' : 'turns'
+
     const right =
-      v.tokens === undefined || ph !== 'idle'
+      !canToggle || isTiny
         ? ''
         : v.b?.threshold === undefined
           ? v.b && !v.b.isAutoCompactEnabled
             ? 'auto-compact off'
             : ''
           : v.turns !== undefined
-            ? `auto-compact in ~${v.turns} ${v.turns === 1 ? 'turn' : 'turns'}`
-            : `auto-compact at ${fmt(v.b.threshold)}`
+            ? isNarrow
+              ? `~${v.turns} ${turnsWord} left`
+              : `auto-compact in ~${v.turns} ${turnsWord}`
+            : isNarrow
+              ? ''
+              : `auto-compact at ${fmt(v.b.threshold)}`
 
     let compactControl
     if (ph === 'compacting') compactControl = null
@@ -450,81 +590,200 @@ export const register: Register = on => {
         <Button key="compact" label="Compact" variant={v.level === 'alert' ? 'primary' : undefined} onPress={() => update($, composing, () => true)} />
       )
 
-    const strip = (
+    // An icon Button that names itself in a small dim line beside it while hovered.
+    const icon = (key: string, glyph: string, name: string, onPress: () => unknown) => (
+      <Box key={`${key}-box`} flexDirection="row" alignItems="center" columnGap={1}>
+        {s.arrowTooltip ? (
+          <Box display="none" hover={{ display: 'flex' }}>
+            <Text size="footnote" dimColor>
+              {name}
+            </Text>
+          </Box>
+        ) : null}
+        <Button key={key} plain dimColor hover={{ dimColor: false }} onPress={onPress}>
+          {glyph}
+        </Button>
+      </Box>
+    )
+    const paneIcon = icon('open-pane', '↗', 'Open pane', () => openPane($, true))
+    const chevron = icon('chevron', isOpen ? '▼' : '▲', toggleLabel, toggle)
+
+    // A Box can't be pressed and a Button holds only text, so each text piece is its own toggle.
+    const strip = canToggle ? (
+      <Box key="strip" flexDirection="row" alignItems="center" columnGap={2}>
+        <Box flexDirection="row" alignItems="center" columnGap={1}>
+          {windowSvg(els, v, { width: 72, height: 10, compacting: false })}
+          <Button key="toggle" plain onPress={toggle}>
+            <Text bold color={tone}>{`${a}${v.pct}%`}</Text>
+          </Button>
+        </Box>
+        <Button key="toggle-tokens" plain onPress={toggle}>
+          <Text>{`${a}${fmt(v.tokens!)}${isNarrow ? '' : ` / ${win}`}`}</Text>
+        </Button>
+        {v.last !== undefined && !isTiny ? (
+          <Button key="toggle-last" plain onPress={toggle}>
+            <Text bold color={DELTA_COLOR}>{fmtDelta(v.last)}</Text>
+            {isNarrow ? null : <Text dimColor> last turn</Text>}
+          </Button>
+        ) : null}
+        <Box flexGrow={1} />
+        {right ? (
+          <Button key="toggle-right" plain onPress={toggle}>
+            <Text color={v.level === 'calm' ? undefined : tone} dimColor={v.level === 'calm'}>
+              {right}
+            </Text>
+          </Button>
+        ) : null}
+        {compactControl}
+        {paneIcon}
+        {chevron}
+      </Box>
+    ) : (
       <Box flexDirection="row" alignItems="center" columnGap={2}>
         {windowSvg(els, v, { width: 72, height: 10, compacting: ph === 'compacting' })}
         {summary}
         <Box flexGrow={1} />
-        {right ? <Text color={v.level === 'calm' ? undefined : tone} dimColor={v.level === 'calm'}>{right}</Text> : null}
-        {v.tokens !== undefined && ph === 'idle' ? <Button key="more" plain dimColor label={isOpen ? 'Less ▾' : 'More ▴'} onPress={toggle} /> : null}
         {compactControl}
+        {paneIcon}
       </Box>
     )
 
-    const details =
-      isOpen && v.tokens !== undefined && ph === 'idle' ? (
-        <Box flexDirection="column" rowGap={1} paddingBottom={1}>
-          <Box flexDirection="row" justifyContent="space-between">
-            <Text>
-              <Text bold color={tone}>{`${approx(v.isEstimate)}${v.pct}%`}</Text>
-              <Text dimColor>{` of ${win}  ·  ${approx(v.isEstimate)}${fmt(v.tokens)} tokens`}</Text>
-            </Text>
-            <Text dimColor>{v.b?.threshold !== undefined ? `auto-compact at ${fmt(v.b.threshold)}` : v.b && !v.b.isAutoCompactEnabled ? 'auto-compact off' : ''}</Text>
-          </Box>
-          {windowSvg(els, v, { height: 12, compacting: false })}
-          {v.b && v.b.used.length > 0 ? (
-            <Box flexDirection="column" rowGap={1}>
-              <Box flexDirection="row" justifyContent="space-between">
-                <Text dimColor>What fills it</Text>
-                <Text dimColor>{v.b.isExact ? 'exact counts' : 'local estimate'}</Text>
-              </Box>
-              {compositionSvg(els, v.b)}
-              {legend(els, v.b, e.props.bodyColumns >= 70 ? 2 : 1)}
-            </Box>
-          ) : null}
-          <Box flexDirection="row" columnGap={4} flexWrap="wrap">
-            <Text dimColor>
-              Last turn <Text bold>{fmtDelta(v.last)}</Text>
-            </Text>
-            <Text dimColor>
-              Avg / turn <Text bold>{v.avg !== undefined ? `${approx(v.isAvgEstimate)}${fmt(v.avg)}` : '—'}</Text>
-            </Text>
-            <Text dimColor>
-              Auto-compact in <Text bold color={tone}>{v.turns !== undefined ? `~${v.turns} ${v.turns === 1 ? 'turn' : 'turns'}` : '—'}</Text>
-            </Text>
-            <Box flexGrow={1} />
-            <Button key="pane" plain dimColor label="Open pane ↗" onPress={() => openPane($)} />
+    const hasClickArea = canToggle && !isComposing && 'Client' in els
+    const Client = hasClickArea && 'Client' in els ? els.Client : undefined
+    // One click layer per row: a single layer stretched over the panel reached only its top row on desktop.
+    const clickable = (node: unknown, key: string) =>
+      Client ? (
+        <Box flexDirection="column" position="relative">
+          {node}
+          <Box position="absolute" top={0} bottom={0} left={0} width="100%">
+            <Client key={key} module="./click-area.tsx" width="100%" height="100%" />
           </Box>
         </Box>
-      ) : null
+      ) : (
+        node
+      )
 
-    const compose =
-      isComposing && ph === 'idle' && !e.props.isWorking ? (
-        <Box flexDirection="column" rowGap={1} paddingBottom={1}>
-          <Text>
-            <Text bold>Compact conversation</Text>
-            <Text dimColor>{v.tokens !== undefined ? `  ·  ${approx(v.isEstimate)}${fmt(v.tokens)} now; older messages become a summary, recent ones stay` : ''}</Text>
-          </Text>
-          {'Input' in els ? (
-            <els.Input
-              key="focus"
-              label="Focus (optional)"
-              placeholder="What the summary must keep"
-              value={text}
-              autoFocus
-              submitLabel="Compact"
-              onInput={value => void update($, draft, () => value)}
-              onSubmit={value => void compactNow($, value)}
-            />
-          ) : null}
-          <Box flexDirection="row" columnGap={2} alignItems="center">
-            <Text dimColor>{s.snapshot ? 'Snapshot first → .claude/context-snapshots/' : 'No snapshot · turn it on in the pane’s Settings'}</Text>
-            <Box flexGrow={1} />
-            <Button key="cancel" label="Cancel" onPress={() => update($, composing, () => false)} />
-            <Button key="go" label="Compact" variant="primary" onPress={async () => compactNow($, await read($, draft))} />
+    // `gap`: 'inner' sits within a section, 'section' between sections; inner spacing is given up first.
+    type Row = { node: unknown; gap?: 'inner' | 'section'; isLegend?: true }
+    const gap = (kind: 'inner' | 'section' = 'section'): Row => ({ node: <Box height={1} />, gap: kind })
+    const legendColumns = e.props.bodyColumns >= 100 ? 3 : e.props.bodyColumns >= 70 ? 2 : 1
+    const threshold = v.b?.threshold !== undefined ? `auto-compact at ${fmt(v.b.threshold)}` : v.b && !v.b.isAutoCompactEnabled ? 'auto-compact off' : ''
+    // Stages, bottom first: revealed one at a time, nearest the strip first.
+    const stages: Row[][] = canToggle
+      ? [
+          [
+            {
+              node: (
+                <Box flexDirection="row" columnGap={4} flexWrap="wrap">
+                  <Button key="close-last" plain onPress={toggle}>
+                    <Text dimColor>Last turn </Text>
+                    <Text bold>{fmtDelta(v.last)}</Text>
+                  </Button>
+                  <Button key="close-avg" plain onPress={toggle}>
+                    <Text dimColor>Avg / turn </Text>
+                    <Text bold>{v.avg !== undefined ? `${approx(v.isAvgEstimate)}${fmt(v.avg)}` : '—'}</Text>
+                  </Button>
+                  <Button key="close-turns" plain onPress={toggle}>
+                    <Text dimColor>Auto-compact in </Text>
+                    <Text bold color={tone}>{v.turns !== undefined ? `~${v.turns} ${turnsWord}` : '—'}</Text>
+                  </Button>
+                  <Box flexGrow={1} />
+                </Box>
+              ),
+            },
+            gap(),
+          ],
+          v.b && v.b.used.length > 0 ? [...legendRows(els, v.b, legendColumns).map(node => ({ node, isLegend: true as const })), gap()] : [],
+          v.b && v.b.used.length > 0
+            ? [
+                {
+                  node: (
+                    <Box flexDirection="row" justifyContent="space-between">
+                      <Button key="close-fills" plain onPress={toggle}>
+                        <Text dimColor>What fills it</Text>
+                      </Button>
+                      <Button key="close-accuracy" plain onPress={toggle}>
+                        <Text dimColor>{v.b.isExact ? 'exact counts' : 'local estimate'}</Text>
+                      </Button>
+                    </Box>
+                  ),
+                },
+                gap('inner'),
+                { node: compositionSvg(els, v.b, v.fadeComposition) },
+                gap('inner'),
+              ]
+            : [],
+          [
+            {
+              node: (
+                <Box flexDirection="row" justifyContent="space-between">
+                  <Button key="close-head" plain onPress={toggle}>
+                    <Text bold color={tone}>{`${a}${v.pct}%`}</Text>
+                    <Text dimColor>{` of ${win}  ·  ${a}${fmt(v.tokens!)} tokens`}</Text>
+                  </Button>
+                  {threshold ? (
+                    <Button key="close-threshold" plain onPress={toggle}>
+                      <Text dimColor>{threshold}</Text>
+                    </Button>
+                  ) : null}
+                </Box>
+              ),
+            },
+            gap('inner'),
+            { node: windowSvg(els, v, { height: 12, compacting: false }) },
+            gap(),
+          ],
+        ].filter(stage => stage.length > 0)
+      : []
+
+    // The band scrolls past maxRows: the open panel gives up inner spacing, then lower legend rows, then section spacing.
+    const budget = Math.max(0, e.props.maxRows - 1)
+    const count = () => stages.reduce((n, stage) => n + stage.length, 0)
+    const dropGaps = (kind: 'inner' | 'section') => {
+      for (const stage of stages) if (count() > budget) stage.splice(0, stage.length, ...stage.filter(r => r.gap !== kind))
+    }
+    const trimLegend = (minKeep: number) => {
+      const legendStage = stages.find(stage => stage.some(r => r.isLegend))
+      if (!legendStage || count() <= budget) return
+      const legend = legendStage.filter(r => r.isLegend)
+      const rest = legendStage.filter(r => !r.isLegend)
+      const keep = legend.length - (count() - budget) - 1
+      if (keep >= minKeep && keep < legend.length) {
+        const more = v.b!.used.length - keep * legendColumns
+        legendStage.splice(0, legendStage.length, ...legend.slice(0, keep), { node: <Text dimColor>{`+${more} more · /context-control for all`}</Text> }, ...rest)
+      } else if (minKeep === 0) {
+        legendStage.splice(0, legendStage.length, ...rest)
+      }
+    }
+    if (count() > budget) dropGaps('inner')
+    trimLegend(1)
+    if (count() > budget) dropGaps('section')
+    trimLegend(0)
+
+    const shownStages = !('Client' in els) || toggled === 0
+      ? isOpen ? stages.length : 0
+      : isOpen
+        ? Math.min(stages.length, 1 + Math.floor((now - toggled) / STAGE_MS))
+        : Math.max(0, stages.length - 1 - Math.floor((now - toggled) / CLOSE_STAGE_MS))
+    const visible = stages.slice(0, shownStages).reverse().flat().slice(-budget || stages.length)
+    const details = visible.length > 0 ? <Box flexDirection="column">{visible.map((r, i) => clickable(r.node, `click-row-${i}`))}</Box> : null
+
+    const compose = composeOf($, els, v, s, text, isComposing && ph === 'idle' && !e.props.isWorking)
+
+    if (Client) {
+      return (
+        <Box flexDirection="column">
+          {details}
+          <Box flexDirection="column" position="relative">
+            {strip}
+            {/* The strip's right end stays bare so Compact and the arrow take their own clicks. */}
+            <Box position="absolute" top={0} bottom={0} left={0} width={Math.max(1, e.props.bodyColumns - CLICK_CLEAR_RIGHT)}>
+              <Client key="click-strip" module="./click-area.tsx" width="100%" height="100%" />
+            </Box>
           </Box>
         </Box>
-      ) : null
+      )
+    }
 
     return (
       <Box flexDirection="column">
@@ -566,10 +825,8 @@ export const register: Register = on => {
       )
       const numberRow = (key: 'warnAt' | 'alertAt' | 'averageOver', label: string, suffix: string, min: number, max: number) =>
         'Input' in els ? (
-          <Box flexDirection="row" alignItems="center" columnGap={2}>
-            <Box flexGrow={1}>
-              <Text>{label}</Text>
-            </Box>
+          // The Input draws its own label before the field; wrapping keeps the suffix off it in a narrow pane.
+          <Box flexDirection="row" alignItems="center" columnGap={2} flexWrap="wrap">
             <els.Input
               key={`set-${key}`}
               label={label}
@@ -607,11 +864,12 @@ export const register: Register = on => {
             </Box>
           ) : null}
           {toggleRow('openPaneOnStart', 'Open this pane when a session starts', s.openPaneOnStart)}
+          {toggleRow('arrowTooltip', 'Name the band’s ↗ and ▲ icons on hover', s.arrowTooltip)}
           {heading('Alerts')}
           {numberRow('warnAt', 'Warn at', '% of auto-compact', 1, 100)}
           {numberRow('alertAt', 'Alert at', '% of auto-compact', 1, 100)}
           {toggleRow('toastOnAlert', 'Toast once when crossing Alert', s.toastOnAlert)}
-          {numberRow('averageOver', 'Turns-left estimate averages', 'turns', 1, 50)}
+          {numberRow('averageOver', 'Average over', 'turns for turns left', 1, 50)}
           {heading('Breakdown accuracy')}
           {toggleRow(
             'exactCounts',
@@ -687,7 +945,7 @@ export const register: Register = on => {
         {used.length > 0 && v.b ? (
           <Box flexDirection="column" rowGap={1} paddingTop={1}>
             {section('What fills it', v.b.isExact ? 'exact counts' : 'local estimate')}
-            {compositionSvg(els, v.b)}
+            {compositionSvg(els, v.b, v.fadeComposition)}
             {legend(els, v.b, 1)}
             <Text dimColor>{`${fmt(usedTotal)} counted by category`}</Text>
           </Box>

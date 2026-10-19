@@ -13,6 +13,7 @@ export const DEFAULTS: ControlSettings = {
   exactCounts: false,
   snapshot: false,
   snapshotGitignore: true,
+  arrowTooltip: true,
 }
 
 export type Level = 'calm' | 'warn' | 'alert'

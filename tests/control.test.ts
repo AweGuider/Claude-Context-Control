@@ -93,7 +93,7 @@ async function measure($: Engine, tokens: number) {
 
 test('the band shows fill, growth and turns until auto-compact on both surfaces', async ($, on) => {
   const state = { tokens: 100_000 }
-  engine(on, state)
+  const { clock } = engine(on, state)
   await start($)
   await measure($, 100_000)
   state.tokens = 110_000
@@ -101,12 +101,16 @@ test('the band shows fill, growth and turns until auto-compact on both surfaces'
 
   for (const surface of ['desktop', 'terminal'] as const) {
     const ui = await $.ui.mount({ plugin: 'context-control', surface, component: 'AbovePrompt', props: BAND })
-    expect((await ui.find({ key: 'toggle' }))?.text).toMatch(/11%.*110\.0k \/ 1M.*\+10\.0k last turn/)
+    expect((await ui.find({ key: 'toggle' }))?.text).toMatch(/11%/)
+    expect((await ui.find({ key: 'toggle-tokens' }))?.text).toMatch(/110\.0k \/ 1M/)
+    expect((await ui.find({ key: 'toggle-last' }))?.text).toMatch(/\+10\.0k last turn/)
     expect(await ui.find({ text: /auto-compact in ~86 turns/ })).toBeDefined()
     await ui.press({ key: 'toggle' })
+    await clock.advance(500)
     expect(await ui.find({ text: /What fills it/ })).toBeDefined()
     expect(await ui.find({ text: /auto-compact at 967\.0k/ })).toBeDefined()
     await ui.press({ key: 'toggle' })
+    await clock.advance(500)
     await ui.unmount()
   }
 })
@@ -118,7 +122,8 @@ test('the band draws from the plain usage before the breakdown arrives', async (
   await startSettled($, clock)
 
   const ui = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
-  expect((await ui.find({ key: 'toggle' }))?.text).toMatch(/10%.*100\.0k \/ 1M/)
+  expect((await ui.find({ key: 'toggle' }))?.text).toMatch(/10%/)
+  expect((await ui.find({ key: 'toggle-tokens' }))?.text).toMatch(/100\.0k \/ 1M/)
   expect(await ui.find({ text: /What fills it|auto-compact/ }), 'no breakdown yet').toBeUndefined()
   release()
   await ui.unmount()
@@ -129,7 +134,8 @@ test('before the first reply the band shows the breakdown estimate, marked ~', a
   await startSettled($, clock)
 
   const ui = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
-  expect((await ui.find({ key: 'toggle' }))?.text).toMatch(/~10%.*~100\.0k \/ 1M/)
+  expect((await ui.find({ key: 'toggle' }))?.text).toMatch(/~10%/)
+  expect((await ui.find({ key: 'toggle-tokens' }))?.text).toMatch(/~100\.0k \/ 1M/)
   // Avg ~ 72.5k messages over 4 prompts = 18.1k; (967k - 100k) / 18.1k = 48 turns.
   expect(await ui.find({ text: /auto-compact in ~48 turns/ })).toBeDefined()
   await ui.press({ key: 'toggle' })
@@ -143,7 +149,7 @@ test('a resumed session keeps its history: Last turn and Avg show at once', asyn
   await startSettled($, clock)
 
   const ui = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
-  expect((await ui.find({ key: 'toggle' }))?.text).toMatch(/\+10\.0k last turn/)
+  expect((await ui.find({ key: 'toggle-last' }))?.text).toMatch(/\+10\.0k last turn/)
   expect(await ui.find({ text: /auto-compact in ~86 turns/ })).toBeDefined()
   await ui.unmount()
 })
@@ -154,13 +160,13 @@ test('turns the mod did not watch are a gap: no Last turn, Avg kept', async ($, 
   await startSettled($, clock)
 
   const ui = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
-  expect((await ui.find({ key: 'toggle' }))?.text).not.toMatch(/last turn/)
+  expect(await ui.find({ key: 'toggle-last' }), 'no Last turn after a gap').toBeUndefined()
   expect(await ui.find({ text: /auto-compact in ~82 turns/ })).toBeDefined()
   await ui.unmount()
 
   await measure($, 160_000)
   const after = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
-  expect((await after.find({ key: 'toggle' }))?.text).toMatch(/\+10\.0k last turn/)
+  expect((await after.find({ key: 'toggle-last' }))?.text).toMatch(/\+10\.0k last turn/)
   await after.unmount()
 })
 
@@ -244,4 +250,184 @@ test('a snapshot is written before compaction when turned on', async ($, on) => 
   expect(written.get(file!)).toContain('C:\\work\\a.ts')
   const ignore = [...written.keys()].find(p => /[\\/]\.claude[\\/]context-snapshots[\\/]\.gitignore$/.test(p))
   expect(written.get(ignore!)).toBe('*\n')
+})
+
+test('a narrow band drops words, then figures, and keeps Compact and the arrow', async ($, on) => {
+  const state = { tokens: 100_000 }
+  engine(on, state)
+  await start($)
+  await measure($, 100_000)
+  await measure($, 110_000)
+
+  const narrow = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: { ...BAND, bodyColumns: 70 } })
+  expect((await narrow.find({ key: 'toggle-tokens' }))?.text).not.toMatch(/1M/)
+  expect((await narrow.find({ key: 'toggle-last' }))?.text).not.toMatch(/last turn/)
+  expect(await narrow.find({ text: /~86 turns left/ })).toBeDefined()
+  expect(await narrow.find({ key: 'compact' })).toBeDefined()
+  expect(await narrow.find({ key: 'chevron' })).toBeDefined()
+  await narrow.unmount()
+
+  const tiny = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: { ...BAND, bodyColumns: 50 } })
+  expect(await tiny.find({ key: 'toggle-last' })).toBeUndefined()
+  expect(await tiny.find({ key: 'toggle-right' })).toBeUndefined()
+  expect(await tiny.find({ key: 'compact' })).toBeDefined()
+  expect(await tiny.find({ key: 'chevron' })).toBeDefined()
+  await tiny.unmount()
+})
+
+test('any figure in the strip opens the details, and any line in them closes it', async ($, on) => {
+  const state = { tokens: 100_000 }
+  const { clock } = engine(on, state)
+  await start($)
+  await measure($, 100_000)
+  await measure($, 110_000)
+
+  const ui = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  for (const [open, close] of [['toggle-tokens', 'close-fills'], ['toggle-right', 'close-avg'], ['chevron', 'close-head']] as const) {
+    await ui.press({ key: open })
+    await clock.advance(500)
+    expect(await ui.find({ key: close }), `${open} opens`).toBeDefined()
+    await ui.press({ key: close })
+    await clock.advance(500)
+    expect(await ui.find({ key: close }), `${close} closes`).toBeUndefined()
+  }
+  await ui.unmount()
+})
+
+test('a redraw without a new reading does not replay the animations', async ($, on) => {
+  const state = { tokens: 100_000 }
+  const { clock } = engine(on, state)
+  await start($)
+  await measure($, 100_000)
+  await measure($, 110_000)
+
+  const fresh = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  expect(JSON.stringify(await fresh.drawn()), 'a new reading grows the bar').toContain('<animate attributeName=\\"width\\"')
+  await fresh.unmount()
+  await clock.advance(5_000)
+
+  const ui = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  await ui.press({ key: 'toggle' })
+  await clock.advance(500)
+  const drawn = JSON.stringify(await ui.drawn())
+  expect(drawn).toContain('What fills it')
+  expect(drawn).not.toContain('<animate attributeName=\\"width\\"')
+  expect(drawn).not.toContain('<animate attributeName=\\"opacity\\" values=\\"0;0;1\\"')
+  await ui.unmount()
+})
+
+const textOf = (node: unknown): string =>
+  typeof node === 'string' ? node : Array.isArray(node) ? node.map(textOf).join('') : node && typeof node === 'object' ? textOf((node as { children?: unknown }).children ?? '') : ''
+
+/**
+ * Every Button in a drawn tree whose `label` differs from its children's text.
+ * The engine fills `label` from the children, but the desktop draws a given label in their place.
+ */
+function labelledWithChildren(node: unknown, found: string[] = []): string[] {
+  if (Array.isArray(node)) {
+    for (const n of node) labelledWithChildren(n, found)
+  } else if (node && typeof node === 'object') {
+    const o = node as { type?: unknown; props?: { label?: unknown; key?: unknown }; children?: unknown }
+    if (o.type === 'Button' && o.children !== undefined && o.props?.label !== textOf(o.children)) found.push(String(o.props?.key))
+    for (const v of Object.values(node)) labelledWithChildren(v, found)
+  }
+  return found
+}
+
+test('no band Button draws a label other than its own text, collapsed or expanded', async ($, on) => {
+  const state = { tokens: 100_000 }
+  engine(on, state)
+  await start($)
+  await measure($, 100_000)
+  await measure($, 110_000)
+
+  const ui = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  const collapsed = await ui.drawn()
+  expect(JSON.stringify(collapsed)).toContain('toggle-tokens')
+  expect(labelledWithChildren(collapsed)).toEqual([])
+  await ui.press({ key: 'toggle' })
+  expect(labelledWithChildren(await ui.drawn())).toEqual([])
+  await ui.unmount()
+})
+
+/** The pane's Settings tab reads these; register them before the test's first call. */
+function paneMocks(on: On) {
+  on('session.cwd', () => ({ value: 'C:\work' }))
+  on('session.model', () => ({ value: 'Opus 5.5' }))
+}
+
+async function turnOn($: Engine, key: string) {
+  const pane = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'Pane', requestId: 'context-control', props: { title: 'Context', isFocused: false, bodyColumns: 50, placement: 'dock', scroll: { offset: 0, bodyRows: 40 } } as never })
+  await pane.press({ key: 'tab-settings' })
+  await pane.press({ key: `set-${key}` })
+  await pane.unmount()
+}
+
+test('a click anywhere opens the breakdown in stages from the strip, and a click on any row closes it', async ($, on) => {
+  const state = { tokens: 100_000 }
+  const { clock } = engine(on, state)
+  paneMocks(on)
+  await start($)
+  await measure($, 100_000)
+  await measure($, 110_000)
+
+  const ui = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  expect(await ui.find({ key: 'toggle-tokens' }), 'the band draws its own figures').toBeDefined()
+  expect(await ui.find({ key: 'compact' }), 'Compact stays a Button').toBeDefined()
+
+  await ui.pointer({ type: 'down', x: 20, y: 0, button: 'left', in: 'click-strip' })
+  await clock.advance(10)
+  expect(await ui.find({ key: 'close-avg' }), 'the stage beside the strip shows first').toBeDefined()
+  expect(await ui.find({ key: 'close-head' }), 'the top stage not yet').toBeUndefined()
+  await clock.advance(500)
+  expect(await ui.find({ key: 'close-head' }), 'every stage once it has run').toBeDefined()
+  expect(await ui.find({ key: 'open-pane' }), 'the pane icon sits beside the arrow').toBeDefined()
+
+  // A row in the middle of the panel, not the header.
+  await ui.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'click-row-6' })
+  await clock.advance(500)
+  expect(await ui.find({ key: 'close-avg' }), 'closed again').toBeUndefined()
+  await ui.unmount()
+})
+
+test('the open breakdown fits the band without scrolling: spacing goes first, then legend rows', async ($, on) => {
+  const state = { tokens: 100_000 }
+  const { clock } = engine(on, state)
+  await start($)
+  await measure($, 100_000)
+  await measure($, 110_000)
+
+  const roomy = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  await roomy.press({ key: 'toggle' })
+  await clock.advance(500)
+  expect(await roomy.find({ text: /more · \/context-control/ }), 'room for every row').toBeUndefined()
+  await roomy.unmount()
+
+  const tight = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: { ...BAND, maxRows: 8, bodyColumns: 60 } })
+  expect(await tight.find({ key: 'close-head' }), 'still open').toBeDefined()
+  expect(await tight.find({ key: 'close-avg' })).toBeDefined()
+  expect(await tight.find({ text: /\+\d+ more · \/context-control for all/ })).toBeDefined()
+  const outer = (await tight.drawn()) as { children?: unknown[] }
+  const details = outer.children?.[0] as { children?: unknown[] }
+  expect(details.children?.length ?? 0, 'rows above the strip').toBeLessThanOrEqual(7)
+  await tight.unmount()
+})
+
+test('the arrow names itself on hover, small and dim, unless that is turned off', async ($, on) => {
+  const state = { tokens: 100_000 }
+  engine(on, state)
+  paneMocks(on)
+  await start($)
+  await measure($, 100_000)
+
+  const ui = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  const drawn = JSON.stringify(await ui.drawn())
+  expect(drawn).toContain('"size":"footnote"')
+  expect(drawn).toContain('Show details')
+  await ui.unmount()
+
+  await turnOn($, 'arrowTooltip')
+  const off = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  expect(JSON.stringify(await off.drawn())).not.toContain('Show details')
+  await off.unmount()
 })
