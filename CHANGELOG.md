@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (0.2.0)
+## 0.2.0 (2026-10-19)
 
 - The band appears as soon as a session opens: it draws from Claude Code's free usage figures first and fetches the breakdown after.
 - Before a session's first reply, the band shows the breakdown's own estimate, marked `~`, instead of "measuring".
