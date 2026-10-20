@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1 (2026-10-21)
+
+- Clears the plugin directory's blocking check on how the band's click area is drawn. No change to the mod's behaviour.
+- README: says that **Compact** runs `/compact <focus>` as if typed, and that the mod runs no other command.
+
 ## 0.2.0 (2026-10-21)
 
 - The band appears as soon as a session opens: it draws from Claude Code's free usage figures first and fetches the breakdown after.
