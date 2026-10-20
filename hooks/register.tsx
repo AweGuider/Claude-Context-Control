@@ -678,14 +678,19 @@ export const register: Register = on => {
     )
 
     const hasClickArea = canToggle && !isComposing && 'Client' in els
-    const Client = hasClickArea && 'Client' in els ? els.Client : undefined
+    // `Client` stays out of value positions: the plugin directory reads it only as an element with a fixed module.
+    const clickLayer = (key: string) => {
+      if (!('Client' in els)) return null
+      const { Client } = els
+      return <Client key={key} module="./click-area.tsx" width="100%" height="100%" />
+    }
     // One click layer per row: a single layer stretched over the panel reached only its top row on desktop.
     const clickable = (node: unknown, key: string) =>
-      Client ? (
+      hasClickArea ? (
         <Box flexDirection="column" position="relative">
           {node}
           <Box position="absolute" top={0} bottom={0} left={0} width="100%">
-            <Client key={key} module="./click-area.tsx" width="100%" height="100%" />
+            {clickLayer(key)}
           </Box>
         </Box>
       ) : (
@@ -799,7 +804,7 @@ export const register: Register = on => {
 
     const compose = composeOf($, els, v, s, text, isComposing && ph === 'idle' && !e.props.isWorking)
 
-    if (Client) {
+    if (hasClickArea) {
       return (
         <Box flexDirection="column">
           {details}
@@ -807,7 +812,7 @@ export const register: Register = on => {
             {strip}
             {/* The strip's right end stays bare so Compact and the arrow take their own clicks. */}
             <Box position="absolute" top={0} bottom={0} left={0} width={Math.max(1, e.props.bodyColumns - CLICK_CLEAR_RIGHT)}>
-              <Client key="click-strip" module="./click-area.tsx" width="100%" height="100%" />
+              {clickLayer('click-strip')}
             </Box>
           </Box>
         </Box>

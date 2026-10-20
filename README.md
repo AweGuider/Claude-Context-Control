@@ -99,6 +99,7 @@ When on, each compaction first writes `.claude/context-snapshots/<date>_<time>.m
 - **Writes** its settings and each session's context size per turn (token counts only, the 20 most recent sessions) through Claude Code's plugin storage and, only with snapshots on, two kinds of file in `.claude/context-snapshots/` under the working directory: the snapshot Markdown files and, with **Keep snapshots out of git** on, a `.gitignore` that tells git to ignore that folder. It writes no other file.
 - **Hooks compaction** (`session.compact`) only to save the snapshot first and to record the compaction in its history. It passes every compaction on unchanged and never delays, edits or blocks it.
 - **Adds one command**, `/context-control`, which opens the mod's pane and does nothing else.
+- **Runs one command**, `/compact <focus>`, as if you typed it, only when you press **Compact**. It runs no other command.
 
 The full policy is in [PRIVACY.md](PRIVACY.md).
 
