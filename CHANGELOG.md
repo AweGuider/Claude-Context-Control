@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (2026-10-19)
+## 0.2.0 (2026-10-21)
 
 - The band appears as soon as a session opens: it draws from Claude Code's free usage figures first and fetches the breakdown after.
 - Before a session's first reply, the band shows the breakdown's own estimate, marked `~`, instead of "measuring".
@@ -11,6 +11,7 @@
 - The open breakdown never scrolls: on a short band it gives up spacing, then its lowest legend rows ("+N more"). The legend takes three columns on a wide band.
 - The pane opens with the keyboard focus, so its first click lands on Overview or Settings. In its Settings, number fields no longer repeat their label, and wrap in a narrow pane.
 - On a narrow band the strip shortens ("~6 turns left", no "last turn", no "/ 1M"), then drops the growth and turns, so **Compact** and the arrow always fit.
+- Fixed: **Compact** did nothing in the desktop app ("not available in a headless (-p / SDK) session"). It now runs `/compact <focus>` as if typed, so it works in every session; the snapshot and the compaction history are kept as before. The focus field has one Compact button instead of two.
 - Opening and closing the breakdown no longer replays the bar's grow or the composition's fade; they animate only when the figures change.
 
 ## 0.1.3 (2026-10-15)

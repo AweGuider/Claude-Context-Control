@@ -238,22 +238,25 @@ async function writeSnapshot(
   return `.claude/context-snapshots/${stamp}.md`
 }
 
+/** The Compact button's run while its `/compact` is in flight: its snapshot, and whether the hook recorded it. */
+type ButtonCompact = { snapshot?: string; isRecorded: boolean }
+let buttonCompact: ButtonCompact | undefined
+
 /**
- * Snapshot first (when on), run the compaction, record it. Shared by the
- * session.compact hook and the mod's own button: the engine runs a plugin's
- * `$.session.compact` past that plugin's own hook, so the button does this itself.
+ * Snapshot first (when on), run the compaction, record it: the session.compact hook's work.
+ * `own`: the button already wrote the snapshot, so this uses it and marks the run recorded.
  */
 async function aroundCompact(
   $: Engine,
-  o: { trigger: string; focus?: string; messages: readonly SessionMessage[] },
+  o: { trigger: string; focus?: string; messages: readonly SessionMessage[]; own?: ButtonCompact },
   run: () => Promise<SessionCompactResult>,
 ): Promise<SessionCompactResult> {
   const s = await read($, settings)
   const before = await read($, reading)
   await update($, phase, () => 'compacting')
   try {
-    let snapshot: string | undefined
-    if (s.snapshot) {
+    let snapshot: string | undefined = o.own?.snapshot
+    if (s.snapshot && !o.own) {
       try {
         snapshot = await writeSnapshot($, { messages: o.messages, trigger: o.trigger, focus: o.focus, reading: before, settings: s })
       } catch (err) {
@@ -276,6 +279,7 @@ async function aroundCompact(
     await update($, compactions, list => [...list, record].slice(-50))
     await update($, phase, () => 'compacted')
     await update($, isAlerted, () => false)
+    if (o.own) o.own.isRecorded = true
     return result
   } catch (err) {
     await update($, phase, () => 'idle')
@@ -285,23 +289,46 @@ async function aroundCompact(
 
 const asMessages = (found: unknown): readonly SessionMessage[] => (Array.isArray(found) ? found : [])
 
+/**
+ * Runs `/compact <focus>` as the person would: `$.session.compact` is refused in an SDK session,
+ * which every desktop session is, and a prompt may not start with `/`. The engine may run this
+ * plugin's own session.compact hook for it or skip it as the caller's, so the button writes the
+ * snapshot first and records the compaction itself unless the hook did.
+ */
 async function compactNow($: Engine, focus: string) {
   await update($, composing, () => false)
   await update($, draft, () => '')
   const text = focus.trim()
-  try {
-    let messages: readonly SessionMessage[] = []
+  const [s, before] = await Promise.all([read($, settings), read($, reading)])
+  await update($, phase, () => 'compacting')
+  const own: ButtonCompact = { isRecorded: false }
+  if (s.snapshot) {
     try {
-      messages = asMessages(await $.session.messages())
-    } catch {
-      messages = []
+      let messages: readonly SessionMessage[] = []
+      try {
+        messages = asMessages(await $.session.messages())
+      } catch {
+        messages = []
+      }
+      own.snapshot = await writeSnapshot($, { messages, trigger: 'manual', focus: text || undefined, reading: before, settings: s })
+    } catch (err) {
+      $.ui.toast(`Snapshot not saved: ${message(err)}`)
     }
-    const result = await aroundCompact($, { trigger: 'manual', focus: text || undefined, messages }, () =>
-      $.session.compact(text ? { instructions: text } : {}),
-    )
-    if (result.skip !== undefined) $.ui.toast(`Compact skipped: ${result.skip}`)
+  }
+  buttonCompact = own
+  try {
+    await $.command.run({ command: 'compact', args: text })
+    if (!own.isRecorded) {
+      const record: Compaction = { at: await $.clock.now(), trigger: 'manual', before: before?.tokens, focus: text || undefined, snapshot: own.snapshot }
+      await update($, compactions, list => [...list, record].slice(-50))
+      await update($, phase, () => 'compacted')
+      await update($, isAlerted, () => false)
+    }
   } catch (err) {
+    await update($, phase, () => 'idle')
     $.ui.toast(`Couldn't compact: ${message(err)}`)
+  } finally {
+    if (buttonCompact === own) buttonCompact = undefined
   }
 }
 
@@ -454,7 +481,8 @@ function composeOf($: Engine, els: Els, v: View, s: ControlSettings, text: strin
         <Text dimColor>{s.snapshot ? 'Snapshot first → .claude/context-snapshots/' : 'No snapshot · turn it on in the pane’s Settings'}</Text>
         <Box flexGrow={1} />
         <Button key="cancel" label="Cancel" onPress={() => update($, composing, () => false)} />
-        <Button key="go" label="Compact" variant="primary" onPress={async () => compactNow($, await read($, draft))} />
+        {/* The field's own submit is the Compact button; a surface without fields gets this one. */}
+        {'Input' in els ? null : <Button key="go" label="Compact" variant="primary" onPress={() => compactNow($, '')} />}
       </Box>
     </Box>
   )
@@ -494,7 +522,8 @@ export const register: Register = on => {
 
   on('session.compact', ($, e, next) => {
     if (e.agentId !== undefined || e.trigger === 'precompute') return next(e)
-    return aroundCompact($, { trigger: e.trigger, focus: e.instructions, messages: e.messages }, () => next(e))
+    const own = e.trigger === 'manual' ? buttonCompact : undefined
+    return aroundCompact($, { trigger: e.trigger, focus: e.instructions, messages: e.messages, own }, () => next(e))
   }).catch(($, e, next) => next(e))
 
   on('ui.message', async ($, e, next) => {

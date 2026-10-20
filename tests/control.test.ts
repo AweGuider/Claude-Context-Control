@@ -183,13 +183,14 @@ test('histories are saved per session and only the newest 20 are kept', async ($
   expect((store.get('history:abc') as { points: unknown[] }).points).toEqual([{ tokens: 100_000 }, { tokens: 120_000 }])
 })
 
-test('compact waits while Claude is working, and opens the focus field when idle', async ($, on) => {
+test('compact waits while Claude is working, then runs /compact with the focus and records it', async ($, on) => {
   const state = { tokens: 500_000 }
-  engine(on, state)
-  let asked: string | undefined
-  on('session.compact', ($, e) => {
-    asked = e.instructions
-    return { messages: SUMMARY, tokensBefore: 500_000, tokensAfter: 40_000 }
+  const { clock, toasts } = engine(on, state)
+  let args: string | undefined
+  // Core's /compact, run past this plugin's own session.compact hook as the caller's: the button records it.
+  on('command.run', { command: 'compact' }, ($, e) => {
+    args = e.args
+    return {}
   })
   await start($)
   await measure($, 500_000)
@@ -201,10 +202,30 @@ test('compact waits while Claude is working, and opens the focus field when idle
 
   const ui = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
   await ui.press({ key: 'compact' })
+  expect(await ui.find({ key: 'go' }), 'the field holds the one Compact button').toBeUndefined()
   await ui.input({ key: 'focus', text: 'keep the plan', kind: 'change' })
-  await ui.press({ key: 'go' })
-  expect(asked).toBe('keep the plan')
-  expect(await ui.find({ text: /Compacted/ }), JSON.stringify(await ui.drawn()).slice(0, 3000)).toBeDefined()
+  await ui.input({ key: 'focus', text: 'keep the plan', kind: 'submit' })
+  await clock.settle()
+  expect(args).toBe('keep the plan')
+  expect(await ui.find({ text: /Compacted/ }), JSON.stringify(toasts)).toBeDefined()
+  await ui.unmount()
+})
+
+test('where /compact cannot run, Compact says so and the band goes back to its figures', async ($, on) => {
+  const state = { tokens: 500_000 }
+  const { toasts, clock } = engine(on, state)
+  on('command.run', { command: 'compact' }, () => {
+    throw new Error('no command runner here')
+  })
+  await start($)
+  await measure($, 500_000)
+
+  const ui = await $.ui.mount({ plugin: 'context-control', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  await ui.press({ key: 'compact' })
+  await ui.input({ key: 'focus', text: 'keep the plan', kind: 'submit' })
+  await clock.settle()
+  expect(toasts[0]).toMatch(/^Couldn't compact:/)
+  expect(await ui.find({ key: 'toggle-tokens' }), 'figures back, not stuck on Compacting').toBeDefined()
   await ui.unmount()
 })
 
