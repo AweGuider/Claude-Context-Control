@@ -678,11 +678,10 @@ export const register: Register = on => {
     )
 
     const hasClickArea = canToggle && !isComposing && 'Client' in els
-    // `Client` stays out of value positions: the plugin directory reads it only as an element with a fixed module.
+    // No local binding named `Client`: the plugin directory reads it only as an element with a fixed module.
     const clickLayer = (key: string) => {
       if (!('Client' in els)) return null
-      const { Client } = els
-      return <Client key={key} module="./click-area.tsx" width="100%" height="100%" />
+      return <els.Client key={key} module="./click-area.tsx" width="100%" height="100%" />
     }
     // One click layer per row: a single layer stretched over the panel reached only its top row on desktop.
     const clickable = (node: unknown, key: string) =>

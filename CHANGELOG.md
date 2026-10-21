@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2 (2026-10-21)
+
+- Clears the plugin directory's blocking check on the band's click area, which 0.2.1 did not: the mod no longer declares anything named `Client`. No change to the mod's behaviour.
+
 ## 0.2.1 (2026-10-21)
 
 - Clears the plugin directory's blocking check on how the band's click area is drawn. No change to the mod's behaviour.

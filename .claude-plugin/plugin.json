@@ -1,7 +1,7 @@
 {
   "name": "context-control",
   "displayName": "Context Control",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "See what fills Claude Code's context window, how many turns until auto-compact, and compact with a focus. Live band above the prompt, breakdown pane, optional pre-compact snapshots.",
   "author": { "name": "AweDev", "url": "https://github.com/AweGuider" },
   "homepage": "https://github.com/AweGuider/Claude-Context-Control",
